@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>英语一 Cloze 复习库</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="年份">
+        <div class="brand">
+          <div class="brand-mark">C</div>
+          <div>
+            <h1>Cloze</h1>
+            <p>英语一真题</p>
+          </div>
+        </div>
+        <nav class="year-list" id="yearList"></nav>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow" id="modeLabel">真题训练</div>
+            <h2 id="yearTitle">英语一</h2>
+          </div>
+
+          <div class="toolbar">
+            <div class="segmented" role="tablist" aria-label="模式">
+              <button class="segment is-active" id="studyMode" type="button">
+                训练
+              </button>
+              <button class="segment" id="reviewMode" type="button">
+                复习库
+              </button>
+            </div>
+            <button class="icon-button" id="toggleAnswers" type="button" title="显示答案">
+              ◐
+            </button>
+            <button class="icon-button hover-button" id="hoverReveal" type="button" title="关闭悬停显示" aria-label="Hover 显示答案">
+              Hover
+            </button>
+            <label class="search">
+              <span>⌕</span>
+              <input id="searchInput" type="search" placeholder="搜索" />
+            </label>
+          </div>
+        </header>
+
+        <section class="sync-card" id="syncCard">
+          <div class="sync-copy">
+            <strong id="syncTitle">本地模式</strong>
+            <span id="syncDetail">配置 Supabase 后可跨设备同步复习库</span>
+          </div>
+          <form class="auth-form" id="authForm">
+            <input id="emailInput" type="email" autocomplete="email" placeholder="邮箱" />
+            <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" />
+            <button id="signInButton" type="submit">登录</button>
+            <button id="signUpButton" type="button">注册</button>
+            <button id="syncNowButton" type="button">同步</button>
+            <button id="signOutButton" type="button">退出</button>
+          </form>
+        </section>
+
+        <section class="stats-strip" id="statsStrip"></section>
+        <section class="content" id="content"></section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="./data.js"></script>
+    <script src="./sync-config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
