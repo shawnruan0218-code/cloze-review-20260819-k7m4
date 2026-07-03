@@ -734,7 +734,8 @@ async function signUp() {
 
   setSyncBusy(true, "正在注册");
   try {
-    const session = await supabaseAuth("/signup", credentials);
+    const redirectTo = window.location.href.split("#")[0];
+    const session = await supabaseAuth(`/signup?redirect_to=${encodeURIComponent(redirectTo)}`, credentials);
     if (session?.access_token) {
       setAuthSession(session);
       await syncFromCloud({ mergeLocal: true, silent: true });
