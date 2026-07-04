@@ -132,7 +132,7 @@ function bindEvents() {
     if (!row || !document.body.contains(row)) return;
 
     event.preventDefault();
-    addHoveredTermToLibrary(row);
+    toggleHoveredTerm(row);
   });
 
   els.yearList.addEventListener("click", (event) => {
@@ -688,28 +688,11 @@ function toggleTerm(examId, cardId, termId) {
   showToast(wasSaved ? "已移出复习库" : "已加入复习库");
 }
 
-function addHoveredTermToLibrary(row) {
+function toggleHoveredTerm(row) {
   const { examId, cardId, termId } = row.dataset;
   if (!examId || !cardId || !termId) return;
 
-  if (isSaved(examId, cardId, termId)) {
-    showToast("已经在复习库");
-    return;
-  }
-
-  const key = makeKey(examId, cardId, termId);
-  state.library[key] = {
-    examId,
-    cardId,
-    termId,
-    addedAt: new Date().toISOString(),
-  };
-  state.revealedTermKeys.add(key);
-
-  saveLibrary();
-  render();
-  syncItemMutation("upsert", state.library[key], key);
-  showToast("已加入复习库");
+  toggleTerm(examId, cardId, termId);
 }
 
 async function bootstrapSync() {
