@@ -12,6 +12,9 @@ create table if not exists public.review_items (
 
 alter table public.review_items enable row level security;
 
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.review_items to authenticated;
+
 drop policy if exists "review_items_select_own" on public.review_items;
 create policy "review_items_select_own"
 on public.review_items

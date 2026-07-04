@@ -159,6 +159,7 @@ function bindEvents() {
 
     const rowTarget = event.target.closest(".term-row[data-term-id]");
     if (rowTarget) {
+      if (state.touchMode && state.mode === "review") return;
       toggleTerm(rowTarget.dataset.examId, rowTarget.dataset.cardId, rowTarget.dataset.termId);
       return;
     }
