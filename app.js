@@ -365,23 +365,55 @@ function render() {
 }
 
 function renderYearList() {
-  els.yearList.innerHTML = state.exams
-    .map((exam) => {
-      const savedCount = savedItemsForExam(exam.id).length;
-      const activeClass = exam.id === state.activeExamId ? " is-active" : "";
-      return `
-        <button class="year-button${activeClass}" type="button" data-exam-id="${exam.id}">
-          <strong>${exam.year}</strong>
-          <span>${savedCount}</span>
-        </button>
-      `;
-    })
+  els.yearList.innerHTML = groupedExams()
+    .map(
+      (group) => `
+        <div class="exam-group">
+          <div class="exam-group-title">${group.title}</div>
+          <div class="exam-group-items">
+            ${group.exams
+              .map((exam) => {
+                const savedCount = savedItemsForExam(exam.id).length;
+                const activeClass = exam.id === state.activeExamId ? " is-active" : "";
+                return `
+                  <button class="year-button${activeClass}" type="button" data-exam-id="${exam.id}">
+                    <strong>${exam.year}</strong>
+                    <span>${savedCount}</span>
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
+        </div>
+      `
+    )
     .join("");
+}
+
+function groupedExams() {
+  const groups = [];
+  const groupById = new Map();
+
+  state.exams.forEach((exam) => {
+    const id = exam.courseId || "english1";
+    if (!groupById.has(id)) {
+      const group = {
+        id,
+        title: exam.courseTitle || "英语一",
+        exams: [],
+      };
+      groups.push(group);
+      groupById.set(id, group);
+    }
+    groupById.get(id).exams.push(exam);
+  });
+
+  return groups;
 }
 
 function renderChrome() {
   const exam = getActiveExam();
-  els.yearTitle.textContent = exam?.title || "英语一";
+  els.yearTitle.textContent = exam?.title || "英语真题";
   els.modeLabel.textContent = state.mode === "study" ? "真题训练" : "复习库";
   els.studyMode.classList.toggle("is-active", state.mode === "study");
   els.reviewMode.classList.toggle("is-active", state.mode === "review");

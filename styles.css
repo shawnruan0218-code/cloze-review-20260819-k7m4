@@ -94,6 +94,28 @@ button {
 
 .year-list {
   display: grid;
+  gap: 16px;
+}
+
+.exam-group {
+  display: grid;
+  gap: 7px;
+}
+
+.exam-group + .exam-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding-top: 14px;
+}
+
+.exam-group-title {
+  padding: 0 8px;
+  color: #d7e1ea;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.exam-group-items {
+  display: grid;
   gap: 6px;
 }
 
@@ -572,7 +594,7 @@ code {
     margin-bottom: 12px;
   }
 
-  .year-list {
+  .exam-group-items {
     grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
   }
 
