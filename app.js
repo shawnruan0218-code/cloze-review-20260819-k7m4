@@ -3,7 +3,9 @@ const LAST_YEAR_KEY = "cloze-review-last-year";
 const HOVER_REVEAL_KEY = "cloze-review-hover-reveal";
 const AUTH_SESSION_KEY = "cloze-review-supabase-session";
 const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
+const FONT_SIZE_KEY = "cloze-review-font-size";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
+const FONT_SIZES = new Set(["small", "medium", "large"]);
 
 const els = {
   yearList: document.querySelector("#yearList"),
@@ -13,6 +15,7 @@ const els = {
   reviewMode: document.querySelector("#reviewMode"),
   toggleAnswers: document.querySelector("#toggleAnswers"),
   hoverReveal: document.querySelector("#hoverReveal"),
+  fontSizeButtons: [...document.querySelectorAll("[data-font-size]")],
   searchInput: document.querySelector("#searchInput"),
   syncCard: document.querySelector("#syncCard"),
   syncTitle: document.querySelector("#syncTitle"),
@@ -39,6 +42,7 @@ const state = {
   mode: "study",
   showAnswers: false,
   hoverReveal: localStorage.getItem(HOVER_REVEAL_KEY) !== "off",
+  fontSize: loadFontSize(),
   touchMode: touchModeMedia.matches,
   query: "",
   library: loadLibrary(),
@@ -95,6 +99,14 @@ function bindEvents() {
     state.hoverReveal = !state.hoverReveal;
     localStorage.setItem(HOVER_REVEAL_KEY, state.hoverReveal ? "on" : "off");
     renderChrome();
+  });
+
+  els.fontSizeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.fontSize = normalizeFontSize(button.dataset.fontSize);
+      localStorage.setItem(FONT_SIZE_KEY, state.fontSize);
+      renderChrome();
+    });
   });
 
   els.authForm.addEventListener("submit", (event) => {
@@ -453,6 +465,10 @@ function renderChrome() {
   els.hoverReveal.hidden = state.touchMode;
   els.hoverReveal.classList.toggle("is-on", !state.touchMode && state.hoverReveal);
   els.hoverReveal.title = state.hoverReveal ? "关闭悬停显示" : "开启悬停显示";
+  document.body.dataset.fontSize = state.fontSize;
+  els.fontSizeButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.fontSize === state.fontSize);
+  });
   document.body.classList.toggle("hover-reveal", !state.touchMode && state.hoverReveal);
   document.body.classList.toggle("touch-mode", state.touchMode);
   if (state.touchMode || !state.hoverReveal) clearHoveredClozes();
@@ -1104,6 +1120,14 @@ function normalizeSyncConfig(config) {
     supabaseUrl: String(config.supabaseUrl || "").replace(/\/$/, ""),
     supabaseAnonKey: String(config.supabaseAnonKey || ""),
   };
+}
+
+function loadFontSize() {
+  return normalizeFontSize(localStorage.getItem(FONT_SIZE_KEY));
+}
+
+function normalizeFontSize(size) {
+  return FONT_SIZES.has(size) ? size : "medium";
 }
 
 function readableError(error) {

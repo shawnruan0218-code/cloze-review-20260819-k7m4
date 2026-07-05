@@ -24,6 +24,10 @@ body {
 }
 
 body {
+  --sentence-font-size: clamp(16px, 1.45vw, 19px);
+  --content-font-size: 16px;
+  --table-heading-font-size: 17px;
+  --table-font-size: 16px;
   margin: 0;
   background: var(--bg);
   color: var(--ink);
@@ -31,6 +35,20 @@ body {
     -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   line-height: 1.68;
+}
+
+body[data-font-size="small"] {
+  --sentence-font-size: clamp(15px, 1.35vw, 17px);
+  --content-font-size: 15px;
+  --table-heading-font-size: 16px;
+  --table-font-size: 15px;
+}
+
+body[data-font-size="large"] {
+  --sentence-font-size: clamp(17px, 1.7vw, 21px);
+  --content-font-size: 17px;
+  --table-heading-font-size: 18px;
+  --table-font-size: 17px;
 }
 
 button,
@@ -240,6 +258,11 @@ button {
   background: var(--panel);
 }
 
+.font-size-control {
+  grid-template-columns: repeat(3, 1fr);
+  min-width: 126px;
+}
+
 .segment {
   border: 0;
   padding: 8px 14px;
@@ -437,13 +460,14 @@ button {
 .sentence {
   color: #1d252d;
   font-family: Georgia, "Times New Roman", "Songti SC", serif;
-  font-size: clamp(17px, 1.7vw, 21px);
+  font-size: var(--sentence-font-size);
   line-height: 1.82;
 }
 
 .translation {
   margin-top: 12px;
   color: #38434d;
+  font-size: var(--content-font-size);
 }
 
 .translation-label {
@@ -498,6 +522,7 @@ button {
 
 .term-body {
   min-width: 0;
+  font-size: var(--content-font-size);
 }
 
 .term-body p {
@@ -547,13 +572,13 @@ button {
 .cloze-table th {
   background: #f3f6f8;
   color: #202832;
-  font-size: 18px;
+  font-size: var(--table-heading-font-size);
   line-height: 1.25;
 }
 
 .cloze-table td {
   color: #1d252d;
-  font-size: 17px;
+  font-size: var(--table-font-size);
   line-height: 1.55;
 }
 
