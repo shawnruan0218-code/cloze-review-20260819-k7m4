@@ -165,8 +165,9 @@ function bindEvents() {
       return;
     }
 
-    const rowTarget = event.target.closest(".term-row[data-term-id]");
+    const rowTarget = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
     if (rowTarget) {
+      if (rowTarget.classList.contains("cloze-table-row")) return;
       if (state.touchMode && state.mode === "review") return;
       toggleTerm(rowTarget.dataset.examId, rowTarget.dataset.cardId, rowTarget.dataset.termId);
       return;
@@ -192,7 +193,7 @@ function bindEvents() {
   });
 
   els.content.addEventListener("mouseout", (event) => {
-    const row = event.target.closest(".term-row[data-term-id]");
+    const row = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
     if (row && !row.contains(event.relatedTarget)) clearHoveredTermRow(row);
 
     const cloze = event.target.closest(".cloze.is-hidden");
@@ -201,7 +202,7 @@ function bindEvents() {
   });
 
   els.content.addEventListener("pointerout", (event) => {
-    const row = event.target.closest(".term-row[data-term-id]");
+    const row = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
     if (row && !row.contains(event.relatedTarget)) clearHoveredTermRow(row);
   });
 }
@@ -491,11 +492,12 @@ function renderStats() {
   const exam = getActiveExam();
   const reviewItems = savedItemsForExam(exam.id);
   const reviewCards = new Set(reviewItems.map((item) => item.cardId)).size;
+  const clozeExam = isClozeExam(exam);
 
   els.statsStrip.innerHTML = `
-    <div class="stat"><strong>${exam.cards.filter((card) => card.type === "card").length}</strong><span>句子</span></div>
-    <div class="stat"><strong>${exam.clozeCount}</strong><span>挖空</span></div>
-    <div class="stat"><strong>${state.mode === "review" ? reviewCards : reviewItems.length}</strong><span>${state.mode === "review" ? "复习句子" : "复习词条"}</span></div>
+    <div class="stat"><strong>${exam.cards.filter((card) => card.type === "card").length}</strong><span>${clozeExam ? "表格词条" : "句子"}</span></div>
+    <div class="stat"><strong>${exam.clozeCount}</strong><span>${clozeExam ? "中文挖空" : "挖空"}</span></div>
+    <div class="stat"><strong>${state.mode === "review" ? reviewCards : reviewItems.length}</strong><span>${state.mode === "review" ? (clozeExam ? "复习词条" : "复习句子") : "复习词条"}</span></div>
   `;
 }
 
@@ -512,6 +514,11 @@ function renderContent() {
       state.mode === "review"
         ? `<div class="empty">复习库还是空的。</div>`
         : `<div class="empty">没有匹配内容。</div>`;
+    return;
+  }
+
+  if (isClozeExam(exam)) {
+    els.content.innerHTML = renderClozeTable(filtered);
     return;
   }
 
@@ -572,6 +579,52 @@ function renderReviewCard(card) {
         ${renderTermList(card, card.terms, "review")}
       </div>
     </article>
+  `;
+}
+
+function renderClozeTable(cards) {
+  const rows = cards.filter((card) => card.type === "card");
+  return `
+    <article class="card cloze-table-card">
+      <div class="cloze-table-wrap">
+        <table class="cloze-table">
+          <thead>
+            <tr>
+              <th class="cloze-action-col"></th>
+              <th>English</th>
+              <th>中文</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((card) => renderClozeTableRow(card)).join("")}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function renderClozeTableRow(card) {
+  const term = card.terms[0];
+  if (!term) return "";
+
+  const termKey = makeKey(card.examId, card.id, term.id);
+  const saved = isSaved(card.examId, card.id, term.id);
+  const revealTerm = state.revealedTermKeys.has(termKey);
+  const savedClass = saved ? " is-saved" : "";
+  const symbol = saved ? "✓" : "+";
+  const title = saved ? "移出复习库" : "加入复习库";
+  const english = escapeHtml(stripMarkup(card.sentenceLines.join(" ")).trim());
+  const meaning = card.translationLine.replace(/^翻译\s*[:：]\s*/, "");
+
+  return `
+    <tr class="cloze-table-row" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">
+      <td class="cloze-action-col">
+        <button class="term-toggle${savedClass}" type="button" title="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">${symbol}</button>
+      </td>
+      <td class="cloze-english-cell">${english}</td>
+      <td class="cloze-meaning-cell">${renderInline(meaning, "translation", null, revealTerm)}</td>
+    </tr>
   `;
 }
 
@@ -1058,7 +1111,7 @@ function readableError(error) {
 }
 
 function updateHoveredTermRow(event) {
-  const row = event.target.closest(".term-row[data-term-id]");
+  const row = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
   if (row) {
     setHoveredTermRow(row);
     return;
@@ -1126,6 +1179,10 @@ function getActiveExam() {
   return state.examById.get(state.activeExamId) || state.exams[0];
 }
 
+function isClozeExam(exam) {
+  return exam?.courseId === "cloze";
+}
+
 function showToast(message) {
   clearTimeout(state.toastTimer);
   els.toast.textContent = message;
@@ -1145,6 +1202,15 @@ function isEditableTarget(target) {
   return Boolean(
     target?.closest?.("input, textarea, select, button, [contenteditable='true']")
   );
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function stripMarkup(text) {
