@@ -2,6 +2,7 @@ const STORAGE_KEY = "cloze-review-library-v1";
 const LAST_YEAR_KEY = "cloze-review-last-year";
 const HOVER_REVEAL_KEY = "cloze-review-hover-reveal";
 const AUTH_SESSION_KEY = "cloze-review-supabase-session";
+const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
 
 const els = {
@@ -41,6 +42,7 @@ const state = {
   touchMode: touchModeMedia.matches,
   query: "",
   library: loadLibrary(),
+  collapsedCourseIds: loadCollapsedCourseIds(),
   hoveredTermRow: null,
   revealedTermKeys: new Set(),
   authSession: loadAuthSession(),
@@ -136,6 +138,12 @@ function bindEvents() {
   });
 
   els.yearList.addEventListener("click", (event) => {
+    const groupButton = event.target.closest("[data-course-toggle]");
+    if (groupButton) {
+      toggleCourseGroup(groupButton.dataset.courseToggle);
+      return;
+    }
+
     const button = event.target.closest("[data-exam-id]");
     if (!button) return;
     state.activeExamId = button.dataset.examId;
@@ -219,6 +227,7 @@ function parseExam(file) {
 
 function parseBlock(file, raw, index) {
   const lines = raw.split("\n");
+  const explicitIdMatch = raw.match(/<!--\s*card-id:\s*([a-z0-9_-]+)\s*-->/i);
   const translationIndex = lines.findIndex((line) =>
     /^翻译\s*[:：]/.test(line.trim())
   );
@@ -226,7 +235,7 @@ function parseBlock(file, raw, index) {
   if (translationIndex < 0) {
     return {
       type: "section",
-      id: `${file.id}-section-${index}`,
+      id: explicitIdMatch ? `${file.id}-section-${explicitIdMatch[1]}` : `${file.id}-section-${index}`,
       examId: file.id,
       raw,
       title: stripMarkup(raw).trim(),
@@ -249,7 +258,7 @@ function parseBlock(file, raw, index) {
 
   return {
     type: "card",
-    id: `${file.id}-card-${index}`,
+    id: explicitIdMatch ? `${file.id}-card-${explicitIdMatch[1]}` : `${file.id}-card-${index}`,
     examId: file.id,
     raw,
     sentenceLines,
@@ -367,10 +376,19 @@ function render() {
 function renderYearList() {
   els.yearList.innerHTML = groupedExams()
     .map(
-      (group) => `
-        <div class="exam-group">
-          <div class="exam-group-title">${group.title}</div>
-          <div class="exam-group-items">
+      (group) => {
+        const collapsed = state.collapsedCourseIds.has(group.id);
+        const savedCount = group.exams.reduce(
+          (sum, exam) => sum + savedItemsForExam(exam.id).length,
+          0
+        );
+        return `
+        <div class="exam-group${collapsed ? " is-collapsed" : ""}">
+          <button class="exam-group-title" type="button" data-course-toggle="${group.id}" aria-expanded="${String(!collapsed)}">
+            <span>${group.title}</span>
+            <small>${savedCount}</small>
+          </button>
+          <div class="exam-group-items" ${collapsed ? "hidden" : ""}>
             ${group.exams
               .map((exam) => {
                 const savedCount = savedItemsForExam(exam.id).length;
@@ -385,9 +403,21 @@ function renderYearList() {
               .join("")}
           </div>
         </div>
-      `
+      `;
+      }
     )
     .join("");
+}
+
+function toggleCourseGroup(courseId) {
+  if (!courseId) return;
+  if (state.collapsedCourseIds.has(courseId)) {
+    state.collapsedCourseIds.delete(courseId);
+  } else {
+    state.collapsedCourseIds.add(courseId);
+  }
+  saveCollapsedCourseIds();
+  renderYearList();
 }
 
 function groupedExams() {
@@ -1074,6 +1104,22 @@ function loadLibrary() {
 
 function saveLibrary() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.library));
+}
+
+function loadCollapsedCourseIds() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) || "[]");
+    return new Set(Array.isArray(ids) ? ids : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedCourseIds() {
+  localStorage.setItem(
+    COLLAPSED_GROUPS_KEY,
+    JSON.stringify([...state.collapsedCourseIds])
+  );
 }
 
 function getActiveExam() {

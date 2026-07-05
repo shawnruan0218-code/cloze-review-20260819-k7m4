@@ -108,10 +108,45 @@ button {
 }
 
 .exam-group-title {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  width: 100%;
+  border: 0;
   padding: 0 8px;
+  background: transparent;
   color: #d7e1ea;
   font-size: 13px;
   font-weight: 900;
+  text-align: left;
+}
+
+.exam-group-title::before {
+  content: "▾";
+  color: #ffe686;
+  font-size: 12px;
+}
+
+.exam-group.is-collapsed .exam-group-title::before {
+  content: "▸";
+}
+
+.exam-group-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exam-group-title small {
+  min-width: 28px;
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #d7e1ea;
+  text-align: center;
+  font-size: 12px;
 }
 
 .exam-group-items {
