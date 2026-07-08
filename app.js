@@ -6,6 +6,7 @@ const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
 const FONT_SIZE_KEY = "cloze-review-font-size";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
 const FONT_SIZES = new Set(["small", "medium", "large"]);
+const CLOUD_PAGE_SIZE = 1000;
 
 const els = {
   yearList: document.querySelector("#yearList"),
@@ -952,9 +953,16 @@ async function syncItemMutation(action, item, key) {
 }
 
 async function fetchCloudLibrary() {
-  const rows = await supabaseRest(
-    "/review_items?select=item_key,exam_id,card_id,term_id,added_at&order=added_at.asc"
-  );
+  const rows = [];
+
+  for (let offset = 0; ; offset += CLOUD_PAGE_SIZE) {
+    const page = await supabaseRest(
+      `/review_items?select=item_key,exam_id,card_id,term_id,added_at&order=added_at.asc&limit=${CLOUD_PAGE_SIZE}&offset=${offset}`
+    );
+
+    rows.push(...page);
+    if (page.length < CLOUD_PAGE_SIZE) break;
+  }
 
   return rows.reduce((library, row) => {
     library[row.item_key] = {
