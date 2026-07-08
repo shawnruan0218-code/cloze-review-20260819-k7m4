@@ -239,8 +239,10 @@ function parseExam(file) {
 }
 
 function parseBlock(file, raw, index) {
-  const lines = raw.split("\n");
   const explicitIdMatch = raw.match(/<!--\s*card-id:\s*([a-z0-9_-]+)\s*-->/i);
+  const lines = raw
+    .split("\n")
+    .filter((line) => !/^<!--\s*card-id:/i.test(line.trim()));
   const translationIndex = lines.findIndex((line) =>
     /^翻译\s*[:：]/.test(line.trim())
   );
