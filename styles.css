@@ -576,6 +576,15 @@ button {
   color: white;
 }
 
+.term-toggle.is-removal-locked,
+.term-toggle.is-removal-locked:disabled {
+  border-color: #8ea7a4;
+  background: #6f8f8c;
+  color: white;
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .round-advance {
   min-width: 42px;
   height: 30px;

@@ -677,10 +677,18 @@ function renderClozeTableRow(card) {
 
   const termKey = makeKey(card.examId, card.id, term.id);
   const saved = isSaved(card.examId, card.id, term.id);
+  const item = state.library[termKey];
+  const removalLocked = saved && !canRemoveSavedItem(item);
   const revealTerm = state.revealedTermKeys.has(termKey);
   const savedClass = saved ? " is-saved" : "";
+  const lockedClass = removalLocked ? " is-removal-locked" : "";
   const symbol = saved ? "✓" : "+";
-  const title = saved ? "移出整个复习库" : "加入复习库";
+  const title = removalLocked
+    ? "已保护，请到第 1 轮移出"
+    : saved
+      ? "移出整个复习库"
+      : "加入复习库";
+  const disabled = removalLocked ? " disabled" : "";
   const english = escapeHtml(stripMarkup(card.sentenceLines.join(" ")).trim());
   const meaning = card.translationLine.replace(/^翻译\s*[:：]\s*/, "");
 
@@ -688,7 +696,7 @@ function renderClozeTableRow(card) {
     <tr class="cloze-table-row" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">
       <td class="cloze-action-col">
         <div class="term-actions">
-          <button class="term-toggle${savedClass}" type="button" title="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">${symbol}</button>
+          <button class="term-toggle${savedClass}${lockedClass}" type="button" title="${title}" aria-label="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}"${disabled}>${symbol}</button>
           ${state.mode === "review" ? renderAdvanceButton(card, term) : ""}
         </div>
       </td>
@@ -726,14 +734,22 @@ function renderTermList(card, terms, mode) {
         .map((term) => {
           const termKey = makeKey(card.examId, card.id, term.id);
           const saved = isSaved(card.examId, card.id, term.id);
+          const item = state.library[termKey];
+          const removalLocked = saved && !canRemoveSavedItem(item);
           const revealTerm = state.revealedTermKeys.has(termKey);
           const savedClass = saved ? " is-saved" : "";
+          const lockedClass = removalLocked ? " is-removal-locked" : "";
           const symbol = saved ? "✓" : "+";
-          const title = saved ? "移出整个复习库" : "加入复习库";
+          const title = removalLocked
+            ? "已保护，请到第 1 轮移出"
+            : saved
+              ? "移出整个复习库"
+              : "加入复习库";
+          const disabled = removalLocked ? " disabled" : "";
           return `
             <div class="term-row" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">
               <div class="term-actions">
-                <button class="term-toggle${savedClass}" type="button" title="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">${symbol}</button>
+                <button class="term-toggle${savedClass}${lockedClass}" type="button" title="${title}" aria-label="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}"${disabled}>${symbol}</button>
                 ${mode === "review" ? renderAdvanceButton(card, term) : ""}
               </div>
               <div class="term-body">
@@ -870,6 +886,11 @@ function toggleTerm(examId, cardId, termId) {
   const key = makeKey(examId, cardId, termId);
   const wasSaved = Boolean(state.library[key]);
 
+  if (wasSaved && !canRemoveSavedItem(state.library[key])) {
+    showToast("请到复习库第 1 轮移出");
+    return;
+  }
+
   if (wasSaved) {
     delete state.library[key];
     state.revealedTermKeys.delete(key);
@@ -892,6 +913,12 @@ function toggleTerm(examId, cardId, termId) {
     key
   );
   showToast(wasSaved ? "已移出复习库" : "已加入复习库");
+}
+
+function canRemoveSavedItem(item) {
+  if (!item) return true;
+  if (reviewRoundOf(item) <= 1) return true;
+  return state.mode === "review" && state.reviewRound === 1;
 }
 
 function handleHoveredTermShortcut(row) {
