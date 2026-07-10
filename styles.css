@@ -248,6 +248,56 @@ button {
   justify-content: flex-end;
 }
 
+.review-rounds {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(76px, 1fr));
+  gap: 6px;
+  max-width: 520px;
+  margin: -6px 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px;
+  background: var(--panel);
+}
+
+.review-rounds[hidden] {
+  display: none;
+}
+
+.review-round {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.review-round small {
+  min-width: 22px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #eef1f5;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.review-round.is-active {
+  background: var(--accent);
+  color: white;
+}
+
+.review-round.is-active small {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
 .segmented {
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
@@ -485,11 +535,17 @@ button {
 
 .term-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 9px;
   align-items: start;
   border-radius: 8px;
   padding: 7px 8px;
+}
+
+.term-actions {
+  display: flex;
+  gap: 5px;
+  align-items: center;
 }
 
 .term-row:hover {
@@ -518,6 +574,30 @@ button {
   border-color: var(--accent);
   background: var(--accent);
   color: white;
+}
+
+.round-advance {
+  min-width: 42px;
+  height: 30px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 0 7px;
+  background: white;
+  color: var(--accent-strong);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.round-advance:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.round-advance.is-complete,
+.round-advance:disabled {
+  border-color: var(--line);
+  background: #eef1f5;
+  color: var(--muted);
+  cursor: default;
 }
 
 .term-body {
@@ -592,7 +672,7 @@ button {
 }
 
 .cloze-action-col {
-  width: 54px;
+  width: 104px;
 }
 
 .cloze-english-cell {
@@ -769,9 +849,21 @@ code {
   }
 
   .term-row {
-    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-columns: max-content minmax(0, 1fr);
     padding-left: 0;
     padding-right: 0;
+  }
+
+  .review-rounds {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: none;
+  }
+
+  .review-round {
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 5px 2px;
   }
 
   .auth-form {

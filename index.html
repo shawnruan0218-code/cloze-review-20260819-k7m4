@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>英语 Cloze 复习库</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260710-rounds" />
   </head>
   <body>
     <div class="app-shell">
@@ -53,6 +53,13 @@
           </div>
         </header>
 
+        <nav class="review-rounds" id="reviewRounds" aria-label="复习轮次" hidden>
+          <button class="review-round is-active" type="button" data-review-round="1">1 轮</button>
+          <button class="review-round" type="button" data-review-round="2">2 轮</button>
+          <button class="review-round" type="button" data-review-round="3">3 轮</button>
+          <button class="review-round" type="button" data-review-round="4">4 轮</button>
+        </nav>
+
         <section class="sync-card" id="syncCard">
           <div class="sync-copy">
             <strong id="syncTitle">本地模式</strong>
@@ -79,6 +86,6 @@
     <script src="./data-english2.js"></script>
     <script src="./data-cloze.js"></script>
     <script src="./sync-config.js"></script>
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260710-rounds"></script>
   </body>
 </html>

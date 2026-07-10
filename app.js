@@ -4,9 +4,13 @@ const HOVER_REVEAL_KEY = "cloze-review-hover-reveal";
 const AUTH_SESSION_KEY = "cloze-review-supabase-session";
 const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
 const FONT_SIZE_KEY = "cloze-review-font-size";
+const REVIEW_ROUND_KEY = "cloze-review-active-round";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
 const FONT_SIZES = new Set(["small", "medium", "large"]);
 const CLOUD_PAGE_SIZE = 1000;
+const CLOUD_WRITE_BATCH_SIZE = 500;
+const MAX_REVIEW_ROUND = 4;
+const CLOUD_ROUND_MARKER = "::review-round-";
 
 const els = {
   yearList: document.querySelector("#yearList"),
@@ -14,6 +18,8 @@ const els = {
   modeLabel: document.querySelector("#modeLabel"),
   studyMode: document.querySelector("#studyMode"),
   reviewMode: document.querySelector("#reviewMode"),
+  reviewRounds: document.querySelector("#reviewRounds"),
+  reviewRoundButtons: [...document.querySelectorAll("[data-review-round]")],
   toggleAnswers: document.querySelector("#toggleAnswers"),
   hoverReveal: document.querySelector("#hoverReveal"),
   fontSizeButtons: [...document.querySelectorAll("[data-font-size]")],
@@ -41,6 +47,7 @@ const state = {
   examById: new Map(),
   activeExamId: "",
   mode: "study",
+  reviewRound: loadReviewRound(),
   showAnswers: false,
   hoverReveal: localStorage.getItem(HOVER_REVEAL_KEY) !== "off",
   fontSize: loadFontSize(),
@@ -89,6 +96,14 @@ function bindEvents() {
   els.reviewMode.addEventListener("click", () => {
     state.mode = "review";
     render();
+  });
+
+  els.reviewRoundButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.reviewRound = normalizeReviewRound(button.dataset.reviewRound);
+      localStorage.setItem(REVIEW_ROUND_KEY, String(state.reviewRound));
+      render();
+    });
   });
 
   els.toggleAnswers.addEventListener("click", () => {
@@ -147,7 +162,7 @@ function bindEvents() {
     if (!row || !document.body.contains(row)) return;
 
     event.preventDefault();
-    toggleHoveredTerm(row);
+    handleHoveredTermShortcut(row);
   });
 
   els.yearList.addEventListener("click", (event) => {
@@ -178,10 +193,20 @@ function bindEvents() {
       return;
     }
 
+    const advanceTarget = event.target.closest("[data-action='advance-round']");
+    if (advanceTarget) {
+      advanceTermToNextRound(
+        advanceTarget.dataset.examId,
+        advanceTarget.dataset.cardId,
+        advanceTarget.dataset.termId
+      );
+      return;
+    }
+
     const rowTarget = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
     if (rowTarget) {
       if (rowTarget.classList.contains("cloze-table-row")) return;
-      if (state.touchMode && state.mode === "review") return;
+      if (state.mode === "review") return;
       toggleTerm(rowTarget.dataset.examId, rowTarget.dataset.cardId, rowTarget.dataset.termId);
       return;
     }
@@ -384,6 +409,7 @@ function extractTermTitle(body) {
 function render() {
   renderYearList();
   renderChrome();
+  renderReviewRounds();
   renderSyncPanel();
   renderStats();
   renderContent();
@@ -477,6 +503,23 @@ function renderChrome() {
   if (state.touchMode || !state.hoverReveal) clearHoveredClozes();
 }
 
+function renderReviewRounds() {
+  const reviewMode = state.mode === "review";
+  els.reviewRounds.hidden = !reviewMode;
+  if (!reviewMode) return;
+
+  const exam = getActiveExam();
+  els.reviewRoundButtons.forEach((button) => {
+    const round = normalizeReviewRound(button.dataset.reviewRound);
+    const count = savedItemsForExam(exam.id).filter(
+      (item) => reviewRoundOf(item) >= round
+    ).length;
+    button.classList.toggle("is-active", round === state.reviewRound);
+    button.setAttribute("aria-pressed", String(round === state.reviewRound));
+    button.innerHTML = `<span>${round} 轮</span><small>${count}</small>`;
+  });
+}
+
 function renderSyncPanel() {
   const signedIn = Boolean(state.authSession?.access_token);
   const email = state.authSession?.user?.email || "";
@@ -510,7 +553,10 @@ function renderSyncPanel() {
 function renderStats() {
   const exam = getActiveExam();
   const reviewItems = savedItemsForExam(exam.id);
-  const reviewCards = new Set(reviewItems.map((item) => item.cardId)).size;
+  const activeRoundItems = reviewItems.filter(
+    (item) => reviewRoundOf(item) >= state.reviewRound
+  );
+  const reviewCards = new Set(activeRoundItems.map((item) => item.cardId)).size;
   const clozeExam = isClozeExam(exam);
 
   els.statsStrip.innerHTML = `
@@ -531,7 +577,7 @@ function renderContent() {
   if (filtered.length === 0) {
     els.content.innerHTML =
       state.mode === "review"
-        ? `<div class="empty">复习库还是空的。</div>`
+        ? `<div class="empty">第 ${state.reviewRound} 轮还没有内容。</div>`
         : `<div class="empty">没有匹配内容。</div>`;
     return;
   }
@@ -560,7 +606,9 @@ function reviewCardsForExam(exam) {
     .filter((card) => card.type === "card")
     .map((card) => ({
       ...card,
-      terms: card.terms.filter((term) => isSaved(exam.id, card.id, term.id)),
+      terms: card.terms.filter((term) =>
+        isInReviewRound(exam.id, card.id, term.id, state.reviewRound)
+      ),
     }))
     .filter((card) => card.terms.length > 0);
 }
@@ -632,14 +680,17 @@ function renderClozeTableRow(card) {
   const revealTerm = state.revealedTermKeys.has(termKey);
   const savedClass = saved ? " is-saved" : "";
   const symbol = saved ? "✓" : "+";
-  const title = saved ? "移出复习库" : "加入复习库";
+  const title = saved ? "移出整个复习库" : "加入复习库";
   const english = escapeHtml(stripMarkup(card.sentenceLines.join(" ")).trim());
   const meaning = card.translationLine.replace(/^翻译\s*[:：]\s*/, "");
 
   return `
     <tr class="cloze-table-row" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">
       <td class="cloze-action-col">
-        <button class="term-toggle${savedClass}" type="button" title="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">${symbol}</button>
+        <div class="term-actions">
+          <button class="term-toggle${savedClass}" type="button" title="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">${symbol}</button>
+          ${state.mode === "review" ? renderAdvanceButton(card, term) : ""}
+        </div>
       </td>
       <td class="cloze-english-cell">${english}</td>
       <td class="cloze-meaning-cell">${renderInline(meaning, "translation", null, revealTerm)}</td>
@@ -678,10 +729,13 @@ function renderTermList(card, terms, mode) {
           const revealTerm = state.revealedTermKeys.has(termKey);
           const savedClass = saved ? " is-saved" : "";
           const symbol = saved ? "✓" : "+";
-          const title = saved ? "移出复习库" : "加入复习库";
+          const title = saved ? "移出整个复习库" : "加入复习库";
           return `
             <div class="term-row" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">
-              <button class="term-toggle${savedClass}" type="button" title="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">${symbol}</button>
+              <div class="term-actions">
+                <button class="term-toggle${savedClass}" type="button" title="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">${symbol}</button>
+                ${mode === "review" ? renderAdvanceButton(card, term) : ""}
+              </div>
               <div class="term-body">
                 ${term.lines
                   .filter((line) => line.trim())
@@ -694,6 +748,23 @@ function renderTermList(card, terms, mode) {
         .join("")}
     </div>
   `;
+}
+
+function renderAdvanceButton(card, term) {
+  const item = state.library[makeKey(card.examId, card.id, term.id)];
+  const itemRound = reviewRoundOf(item);
+  const activeRound = state.reviewRound;
+
+  if (activeRound >= MAX_REVIEW_ROUND) {
+    return `<button class="round-advance is-complete" type="button" disabled title="已经到第 4 轮">4</button>`;
+  }
+
+  if (itemRound > activeRound) {
+    return `<button class="round-advance is-complete" type="button" disabled title="已进入第 ${itemRound} 轮">${itemRound}</button>`;
+  }
+
+  const nextRound = activeRound + 1;
+  return `<button class="round-advance" type="button" title="加入第 ${nextRound} 轮（电脑端可按 Q）" data-action="advance-round" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">→${nextRound}</button>`;
 }
 
 function renderInline(text, context, selectedTerms = null, forceReveal = false) {
@@ -808,6 +879,7 @@ function toggleTerm(examId, cardId, termId) {
       cardId,
       termId,
       addedAt: new Date().toISOString(),
+      reviewRound: 1,
     };
     state.revealedTermKeys.add(key);
   }
@@ -822,11 +894,43 @@ function toggleTerm(examId, cardId, termId) {
   showToast(wasSaved ? "已移出复习库" : "已加入复习库");
 }
 
-function toggleHoveredTerm(row) {
+function handleHoveredTermShortcut(row) {
   const { examId, cardId, termId } = row.dataset;
   if (!examId || !cardId || !termId) return;
 
+  if (state.mode === "review") {
+    advanceTermToNextRound(examId, cardId, termId);
+    return;
+  }
+
   toggleTerm(examId, cardId, termId);
+}
+
+function advanceTermToNextRound(examId, cardId, termId) {
+  const key = makeKey(examId, cardId, termId);
+  const item = state.library[key];
+  if (!item) return;
+
+  const currentRound = state.reviewRound;
+  const itemRound = reviewRoundOf(item);
+
+  if (currentRound >= MAX_REVIEW_ROUND) {
+    showToast("已经是第 4 轮");
+    return;
+  }
+
+  if (itemRound > currentRound) {
+    showToast(`已经进入第 ${itemRound} 轮`);
+    return;
+  }
+
+  const nextRound = currentRound + 1;
+  item.reviewRound = nextRound;
+  item.updatedAt = new Date().toISOString();
+  saveLibrary();
+  render();
+  syncItemMutation("promote", item, key, nextRound);
+  showToast(`已加入第 ${nextRound} 轮`);
 }
 
 async function bootstrapSync() {
@@ -908,12 +1012,16 @@ async function syncFromCloud({ mergeLocal = false, silent = false } = {}) {
   try {
     await refreshSessionIfNeeded();
     const remoteLibrary = await fetchCloudLibrary();
-    const nextLibrary = mergeLocal ? { ...remoteLibrary, ...state.library } : remoteLibrary;
+    const nextLibrary = mergeLocal
+      ? mergeReviewLibraries(remoteLibrary, state.library)
+      : remoteLibrary;
 
     if (mergeLocal) {
       const missingItems = Object.entries(nextLibrary)
-        .filter(([key]) => !remoteLibrary[key])
-        .map(([key, item]) => cloudItemFromLocal(key, item));
+        .filter(([key, item]) =>
+          !remoteLibrary[key] || reviewRoundOf(item) > reviewRoundOf(remoteLibrary[key])
+        )
+        .flatMap(([key, item]) => cloudItemsFromLocal(key, item));
       if (missingItems.length) await upsertCloudItems(missingItems);
     }
 
@@ -933,7 +1041,7 @@ async function syncFromCloud({ mergeLocal = false, silent = false } = {}) {
   }
 }
 
-async function syncItemMutation(action, item, key) {
+async function syncItemMutation(action, item, key, round = 1) {
   if (!state.syncConfigured || !state.authSession) return;
 
   try {
@@ -941,6 +1049,9 @@ async function syncItemMutation(action, item, key) {
     if (action === "delete") {
       await deleteCloudItem(key);
       state.syncMessage = "已同步删除";
+    } else if (action === "promote") {
+      await upsertCloudItems([cloudItemFromLocal(key, item, round)]);
+      state.syncMessage = `已同步到第 ${round} 轮`;
     } else {
       await upsertCloudItems([cloudItemFromLocal(key, item)]);
       state.syncMessage = "已同步加入";
@@ -965,11 +1076,15 @@ async function fetchCloudLibrary() {
   }
 
   return rows.reduce((library, row) => {
-    library[row.item_key] = {
+    const { baseKey, round } = parseCloudItemKey(row.item_key);
+    const existing = library[baseKey];
+    library[baseKey] = {
+      ...existing,
       examId: row.exam_id,
       cardId: row.card_id,
       termId: row.term_id,
-      addedAt: row.added_at,
+      addedAt: existing?.addedAt || row.added_at,
+      reviewRound: Math.max(reviewRoundOf(existing), round),
     };
     return library;
   }, {});
@@ -977,30 +1092,52 @@ async function fetchCloudLibrary() {
 
 async function upsertCloudItems(items) {
   if (!items.length) return;
-  await supabaseRest("/review_items?on_conflict=id", {
-    method: "POST",
-    headers: {
-      "Prefer": "resolution=merge-duplicates,return=minimal",
-    },
-    body: JSON.stringify(items),
-  });
+  for (let index = 0; index < items.length; index += CLOUD_WRITE_BATCH_SIZE) {
+    await supabaseRest("/review_items?on_conflict=id", {
+      method: "POST",
+      headers: {
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(items.slice(index, index + CLOUD_WRITE_BATCH_SIZE)),
+    });
+  }
 }
 
 async function deleteCloudItem(key) {
-  await supabaseRest(`/review_items?id=eq.${encodeURIComponent(cloudIdForKey(key))}`, {
-    method: "DELETE",
-    headers: {
-      "Prefer": "return=minimal",
-    },
-  });
+  const cloudKeys = [
+    key,
+    ...Array.from(
+      { length: MAX_REVIEW_ROUND - 1 },
+      (_unused, index) => cloudRoundKey(key, index + 2)
+    ),
+  ];
+
+  await Promise.all(
+    cloudKeys.map((cloudKey) =>
+      supabaseRest(`/review_items?id=eq.${encodeURIComponent(cloudIdForKey(cloudKey))}`, {
+        method: "DELETE",
+        headers: {
+          "Prefer": "return=minimal",
+        },
+      })
+    )
+  );
 }
 
-function cloudItemFromLocal(key, item) {
+function cloudItemsFromLocal(key, item) {
+  const reviewRound = reviewRoundOf(item);
+  return Array.from({ length: reviewRound }, (_unused, index) =>
+    cloudItemFromLocal(key, item, index + 1)
+  );
+}
+
+function cloudItemFromLocal(key, item, round = 1) {
   const userId = state.authSession?.user?.id;
+  const cloudKey = round > 1 ? cloudRoundKey(key, round) : key;
   return {
-    id: cloudIdForKey(key),
+    id: cloudIdForKey(cloudKey),
     user_id: userId,
-    item_key: key,
+    item_key: cloudKey,
     exam_id: item.examId,
     card_id: item.cardId,
     term_id: item.termId,
@@ -1011,6 +1148,31 @@ function cloudItemFromLocal(key, item) {
 
 function cloudIdForKey(key) {
   return `${state.authSession.user.id}::${key}`;
+}
+
+function cloudRoundKey(key, round) {
+  return `${key}${CLOUD_ROUND_MARKER}${round}`;
+}
+
+function parseCloudItemKey(key) {
+  const match = String(key).match(/^(.*)::review-round-([2-4])$/);
+  if (!match) return { baseKey: key, round: 1 };
+  return { baseKey: match[1], round: Number(match[2]) };
+}
+
+function mergeReviewLibraries(remoteLibrary, localLibrary) {
+  const merged = { ...remoteLibrary };
+
+  Object.entries(localLibrary).forEach(([key, localItem]) => {
+    const remoteItem = merged[key];
+    merged[key] = {
+      ...(remoteItem || {}),
+      ...localItem,
+      reviewRound: Math.max(reviewRoundOf(remoteItem), reviewRoundOf(localItem)),
+    };
+  });
+
+  return merged;
 }
 
 async function supabaseAuth(path, body) {
@@ -1140,6 +1302,16 @@ function normalizeFontSize(size) {
   return FONT_SIZES.has(size) ? size : "medium";
 }
 
+function loadReviewRound() {
+  return normalizeReviewRound(localStorage.getItem(REVIEW_ROUND_KEY));
+}
+
+function normalizeReviewRound(round) {
+  const value = Number(round);
+  if (!Number.isInteger(value)) return 1;
+  return Math.min(MAX_REVIEW_ROUND, Math.max(1, value));
+}
+
 function readableError(error) {
   return error?.message || "操作失败";
 }
@@ -1173,6 +1345,15 @@ function isSaved(examId, cardId, termId) {
   return Boolean(state.library[makeKey(examId, cardId, termId)]);
 }
 
+function isInReviewRound(examId, cardId, termId, round) {
+  const item = state.library[makeKey(examId, cardId, termId)];
+  return Boolean(item) && reviewRoundOf(item) >= normalizeReviewRound(round);
+}
+
+function reviewRoundOf(item) {
+  return item ? normalizeReviewRound(item.reviewRound) : 1;
+}
+
 function savedItemsForExam(examId) {
   return Object.values(state.library).filter((item) => item.examId === examId);
 }
@@ -1183,7 +1364,17 @@ function makeKey(examId, cardId, termId) {
 
 function loadLibrary() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    return Object.entries(stored).reduce((library, [key, item]) => {
+      const { baseKey, round } = parseCloudItemKey(key);
+      const existing = library[baseKey];
+      library[baseKey] = {
+        ...(existing || {}),
+        ...item,
+        reviewRound: Math.max(reviewRoundOf(existing), reviewRoundOf(item), round),
+      };
+      return library;
+    }, {});
   } catch {
     return {};
   }
@@ -1234,7 +1425,7 @@ function clearHoveredClozes() {
 
 function isEditableTarget(target) {
   return Boolean(
-    target?.closest?.("input, textarea, select, button, [contenteditable='true']")
+    target?.closest?.("input, textarea, select, [contenteditable='true']")
   );
 }
 
