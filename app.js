@@ -708,13 +708,96 @@ function renderClozeTableRow(card) {
 
 function renderSentence(card, selectedTerms = null) {
   if (!card.sentenceLines.length) return "";
+  const baseLines = card.sentenceLines.map(mergeAdjacentSentenceMarks);
+  const sentenceLines = selectedTerms
+    ? addMissingSentenceHighlights(baseLines, selectedTerms)
+    : baseLines;
   return `
     <div class="sentence">
-      ${card.sentenceLines
+      ${sentenceLines
         .map((line) => renderInline(line, "sentence", selectedTerms))
         .join("<br>")}
     </div>
   `;
+}
+
+function mergeAdjacentSentenceMarks(line) {
+  return String(line).replace(
+    /<\/(?:font|u)><(?:font|u)\b[^>]*>/gi,
+    ""
+  );
+}
+
+function addMissingSentenceHighlights(lines, selectedTerms) {
+  const marks = lines.flatMap(sentenceMarksInLine);
+  const nextLines = [...lines];
+
+  selectedTerms.forEach((term) => {
+    if (marks.some((mark) => termMatchesHighlight(term, normalizeMatchText(mark)))) {
+      return;
+    }
+
+    const candidates = fallbackTermCandidates(term.title);
+    candidates.forEach((candidate) => {
+      for (let index = 0; index < nextLines.length; index += 1) {
+        const result = wrapMatchingPhrase(nextLines[index], candidate);
+        if (!result.matched) continue;
+        nextLines[index] = result.text;
+        marks.push(candidate);
+        break;
+      }
+    });
+  });
+
+  return nextLines;
+}
+
+function sentenceMarksInLine(line) {
+  const marks = [];
+  for (const match of String(line).matchAll(/<font\b[^>]*>([\s\S]*?)<\/font>/gi)) {
+    marks.push(match[1]);
+  }
+  for (const match of String(line).matchAll(/<u\b[^>]*>([\s\S]*?)<\/u>/gi)) {
+    marks.push(match[1]);
+  }
+  return marks;
+}
+
+function fallbackTermCandidates(title) {
+  return termFragments(stripMarkup(title))
+    .map((candidate) =>
+      candidate
+        .replace(/^[-–—(\s]+/, "")
+        .replace(/[：:，,。.;；!?？!）)\s]+$/, "")
+        .trim()
+    )
+    .filter((candidate) => {
+      if (candidate.length < 3 || /[^\x00-\x7F]/.test(candidate)) return false;
+      const words = matchWords(candidate);
+      return words.length > 0 && words.length <= 10;
+    });
+}
+
+function wrapMatchingPhrase(html, candidate) {
+  const parts = String(html).split(/(<[^>]+>)/g);
+  let markDepth = 0;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (/^<[^>]+>$/.test(part)) {
+      if (/^<\/(?:font|u)\b/i.test(part)) markDepth = Math.max(0, markDepth - 1);
+      if (/^<(?:font|u)\b/i.test(part)) markDepth += 1;
+      continue;
+    }
+    if (markDepth > 0) continue;
+
+    const match = findMorphologicalPhrase(part, candidate);
+    if (!match) continue;
+    parts[index] = `${part.slice(0, match.start)}<font color="#ffff00">${part.slice(match.start, match.end)}</font>${part.slice(match.end)}`;
+    return { text: parts.join(""), matched: true };
+  }
+
+  return { text: html, matched: false };
 }
 
 function renderTranslation(card) {
@@ -839,12 +922,22 @@ function termMatchesHighlight(term, highlight) {
   return termFragments(term.title).some((fragment) => {
     const normalizedFragment = normalizeMatchText(fragment);
     if (!normalizedFragment) return false;
+    const relaxedFragment = stripLeadingBeVerb(normalizedFragment);
     return (
       sameMatchText(normalizedFragment, highlight) ||
       containsMatchText(normalizedFragment, highlight) ||
-      containsMatchText(highlight, normalizedFragment)
+      containsMatchText(highlight, normalizedFragment) ||
+      sameMatchText(relaxedFragment, relaxedHighlight) ||
+      containsMatchText(relaxedFragment, relaxedHighlight) ||
+      containsMatchText(relaxedHighlight, relaxedFragment) ||
+      morphologicalPhraseMatch(normalizedFragment, highlight) ||
+      meaningfulCommonPhraseMatch(normalizedFragment, highlight) ||
+      fuzzyMatchText(normalizedFragment, highlight)
     );
-  });
+  }) ||
+    morphologicalPhraseMatch(title, highlight) ||
+    meaningfulCommonPhraseMatch(title, highlight) ||
+    fuzzyMatchText(title, highlight);
 }
 
 function termFragments(title) {
@@ -861,9 +954,170 @@ function normalizeMatchText(text) {
     .replace(/&nbsp;/g, " ")
     .replace(/[“”‘’"'`]/g, "")
     .replace(/[()（）[\]{}<>]/g, " ")
-    .replace(/[：:，,。.;；!?？!—–\-]+/g, " ")
+    .replace(/[：:，,。.;；!?？!—–\-…]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function morphologicalPhraseMatch(left, right) {
+  const leftWords = matchWords(left);
+  const rightWords = matchWords(right);
+  if (!leftWords.length || !rightWords.length) return false;
+
+  return (
+    phraseWordsContain(leftWords, rightWords) ||
+    phraseWordsContain(rightWords, leftWords)
+  );
+}
+
+function meaningfulCommonPhraseMatch(left, right) {
+  const leftWords = matchWords(left);
+  const rightWords = matchWords(right);
+  if (!leftWords.length || !rightWords.length) return false;
+
+  for (let leftIndex = 0; leftIndex < leftWords.length; leftIndex += 1) {
+    for (let rightIndex = 0; rightIndex < rightWords.length; rightIndex += 1) {
+      let length = 0;
+      let letterCount = 0;
+      while (
+        leftIndex + length < leftWords.length &&
+        rightIndex + length < rightWords.length &&
+        wordsMorphologicallyMatch(
+          leftWords[leftIndex + length],
+          rightWords[rightIndex + length]
+        )
+      ) {
+        letterCount += Math.min(
+          leftWords[leftIndex + length].length,
+          rightWords[rightIndex + length].length
+        );
+        length += 1;
+      }
+
+      if (length >= 2 && letterCount >= 4) return true;
+      if (length === 1 && letterCount >= 6) return true;
+    }
+  }
+
+  return false;
+}
+
+function findMorphologicalPhrase(text, candidate) {
+  const textWords = indexedMatchWords(text);
+  const candidateWords = matchWords(candidate);
+  if (!candidateWords.length || candidateWords.length > textWords.length) return null;
+
+  for (let index = 0; index <= textWords.length - candidateWords.length; index += 1) {
+    const windowWords = textWords.slice(index, index + candidateWords.length);
+    if (!phraseWordsEqual(candidateWords, windowWords.map((word) => word.value))) continue;
+    return {
+      start: windowWords[0].start,
+      end: windowWords[windowWords.length - 1].end,
+    };
+  }
+
+  return null;
+}
+
+function phraseWordsContain(container, part) {
+  if (part.length > container.length) return false;
+  if (part.length === 1 && part[0].length < 3) return false;
+
+  for (let index = 0; index <= container.length - part.length; index += 1) {
+    if (phraseWordsEqual(container.slice(index, index + part.length), part)) return true;
+  }
+  return false;
+}
+
+function phraseWordsEqual(leftWords, rightWords) {
+  return leftWords.every((word, index) => wordsMorphologicallyMatch(word, rightWords[index]));
+}
+
+function wordsMorphologicallyMatch(left, right) {
+  const leftForms = wordForms(left);
+  const rightForms = wordForms(right);
+  return [...leftForms].some((form) => rightForms.has(form));
+}
+
+function wordForms(word) {
+  const normalized = String(word)
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/'s$/, "");
+  const special = canonicalSpecialWord(normalized);
+  const forms = new Set([normalized, special]);
+
+  if (normalized.endsWith("ies") && normalized.length > 4) {
+    forms.add(`${normalized.slice(0, -3)}y`);
+  }
+  if (normalized.endsWith("s") && normalized.length > 3) {
+    forms.add(normalized.slice(0, -1));
+  }
+  if (normalized.endsWith("es") && normalized.length > 4) {
+    forms.add(normalized.slice(0, -2));
+  }
+  if (normalized.endsWith("ed") && normalized.length > 4) {
+    addStemForms(forms, normalized.slice(0, -2));
+    forms.add(normalized.slice(0, -1));
+  }
+  if (normalized.endsWith("ing") && normalized.length > 5) {
+    const stem = normalized.slice(0, -3);
+    addStemForms(forms, stem);
+    forms.add(`${stem}e`);
+  }
+
+  return forms;
+}
+
+function addStemForms(forms, stem) {
+  forms.add(stem);
+  if (/(.)\1$/.test(stem)) forms.add(stem.slice(0, -1));
+}
+
+function canonicalSpecialWord(word) {
+  if (/^(am|is|are|was|were|been|being)$/.test(word)) return "be";
+  if (/^(did|does|done|doing)$/.test(word)) return "do";
+  if (/^(has|had|having)$/.test(word)) return "have";
+  if (/^(one|ones|his|her|their|our|my|your|its)$/.test(word)) return "possessive";
+  return word;
+}
+
+function matchWords(text) {
+  return indexedMatchWords(text).map((word) => word.value);
+}
+
+function indexedMatchWords(text) {
+  return [...String(text).matchAll(/[A-Za-z]+(?:[’'][A-Za-z]+)?/g)].map((match) => ({
+    value: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+}
+
+function fuzzyMatchText(left, right) {
+  const a = stripLeadingBeVerb(normalizeMatchText(left));
+  const b = stripLeadingBeVerb(normalizeMatchText(right));
+  if (a.length < 5 || b.length < 5) return false;
+  const maxLength = Math.max(a.length, b.length);
+  return 1 - editDistance(a, b) / maxLength >= 0.78;
+}
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_unused, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    let diagonal = previous[0];
+    previous[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const above = previous[rightIndex];
+      previous[rightIndex] = Math.min(
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + 1,
+        diagonal + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
 }
 
 function sameMatchText(a, b) {
