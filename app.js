@@ -729,27 +729,42 @@ function mergeAdjacentSentenceMarks(line) {
 }
 
 function addMissingSentenceHighlights(lines, selectedTerms) {
-  const marks = lines.flatMap(sentenceMarksInLine);
-  const nextLines = [...lines];
+  const sourceMarks = lines.flatMap(sentenceMarksInLine);
+  const nextLines = lines.map(stripSentenceMarkTags);
 
   selectedTerms.forEach((term) => {
-    if (marks.some((mark) => termMatchesHighlight(term, normalizeMatchText(mark)))) {
-      return;
-    }
-
     const candidates = fallbackTermCandidates(term.title);
-    candidates.forEach((candidate) => {
-      for (let index = 0; index < nextLines.length; index += 1) {
-        const result = wrapMatchingPhrase(nextLines[index], candidate);
-        if (!result.matched) continue;
-        nextLines[index] = result.text;
-        marks.push(candidate);
-        break;
-      }
-    });
+    let generatedCount = applyHighlightCandidates(nextLines, candidates);
+
+    if (generatedCount === 0) {
+      const matchingSourceMarks = sourceMarks
+        .filter((mark) => termMatchesHighlight(term, normalizeMatchText(mark)))
+        .map(stripMarkup);
+      generatedCount += applyHighlightCandidates(nextLines, matchingSourceMarks);
+    }
   });
 
   return nextLines;
+}
+
+function stripSentenceMarkTags(line) {
+  return String(line).replace(/<\/?(?:font|u)\b[^>]*>/gi, "");
+}
+
+function applyHighlightCandidates(lines, candidates) {
+  let generatedCount = 0;
+
+  candidates.forEach((candidate) => {
+    for (let index = 0; index < lines.length; index += 1) {
+      const result = wrapMatchingPhrase(lines[index], candidate);
+      if (!result.matched) continue;
+      lines[index] = result.text;
+      generatedCount += 1;
+      break;
+    }
+  });
+
+  return generatedCount;
 }
 
 function sentenceMarksInLine(line) {
@@ -765,17 +780,45 @@ function sentenceMarksInLine(line) {
 
 function fallbackTermCandidates(title) {
   return termFragments(stripMarkup(title))
-    .map((candidate) =>
-      candidate
+    .flatMap((candidate) => {
+      const cleaned = candidate
+        .split(/\s+\+\s+/)[0]
+        .replace(/\s*\([^)]*\)\s*$/, "")
         .replace(/^[-–—(\s]+/, "")
         .replace(/[：:，,。.;；!?？!）)\s]+$/, "")
-        .trim()
-    )
+        .trim();
+      return [cleaned, ...grammarPatternAlternatives(cleaned)];
+    })
     .filter((candidate) => {
-      if (candidate.length < 3 || /[^\x00-\x7F]/.test(candidate)) return false;
+      const shortAllowed = /^(it|do)$/i.test(candidate);
+      if ((!shortAllowed && candidate.length < 3) || /[\u3400-\u9fff]/.test(candidate)) {
+        return false;
+      }
       const words = matchWords(candidate);
       return words.length > 0 && words.length <= 10;
     });
+}
+
+function grammarPatternAlternatives(candidate) {
+  const alternatives = [];
+  const words = matchWords(candidate);
+  const particleWords = new Set(["away", "down", "in", "off", "on", "out", "up"]);
+
+  if (words.length === 3 && particleWords.has(words[1].toLowerCase())) {
+    alternatives.push(`${words[2]} ${words[0]} ${words[1]}`);
+    alternatives.push(`${words[2]} A ${words[0]} ${words[1]}`);
+  }
+
+  const passiveMatch = candidate.match(
+    /^([A-Za-z]+)\s+(?:a|an|the)\s+([A-Za-z]+)\s+(at|as|to|with|into|from|of|on)\s+(sb|someone|sth|something)\.?$/i
+  );
+  if (passiveMatch) {
+    alternatives.push(
+      `${passiveMatch[2]} ${passiveMatch[1]} ${passiveMatch[3]} ${passiveMatch[4]}`
+    );
+  }
+
+  return alternatives;
 }
 
 function wrapMatchingPhrase(html, candidate) {
@@ -906,6 +949,17 @@ function shouldKeepSentenceMark(inner, selectedTerms) {
 }
 
 function termMatchesHighlight(term, highlight) {
+  if (
+    fallbackTermCandidates(term.title).some(
+      (candidate) =>
+        placeholderPhraseMatch(candidate, highlight) ||
+        flexiblePhraseMatch(candidate, highlight)
+    )
+  ) {
+    return true;
+  }
+  if (placeholderPhraseMatch(term.title, highlight)) return true;
+  if (flexiblePhraseMatch(term.title, highlight)) return true;
   const title = normalizeMatchText(term.title);
   if (!title) return false;
 
@@ -930,6 +984,8 @@ function termMatchesHighlight(term, highlight) {
       sameMatchText(relaxedFragment, relaxedHighlight) ||
       containsMatchText(relaxedFragment, relaxedHighlight) ||
       containsMatchText(relaxedHighlight, relaxedFragment) ||
+      placeholderPhraseMatch(fragment, highlight) ||
+      flexiblePhraseMatch(fragment, highlight) ||
       morphologicalPhraseMatch(normalizedFragment, highlight) ||
       meaningfulCommonPhraseMatch(normalizedFragment, highlight) ||
       fuzzyMatchText(normalizedFragment, highlight)
@@ -1005,7 +1061,11 @@ function meaningfulCommonPhraseMatch(left, right) {
 function findMorphologicalPhrase(text, candidate) {
   const textWords = indexedMatchWords(text);
   const candidateWords = matchWords(candidate);
-  if (!candidateWords.length || candidateWords.length > textWords.length) return null;
+  if (!candidateWords.length || !textWords.length) return null;
+
+  const placeholderMatch = findPlaceholderPhrase(textWords, candidateWords);
+  if (placeholderMatch) return placeholderMatch;
+  if (candidateWords.length > textWords.length) return null;
 
   for (let index = 0; index <= textWords.length - candidateWords.length; index += 1) {
     const windowWords = textWords.slice(index, index + candidateWords.length);
@@ -1016,7 +1076,136 @@ function findMorphologicalPhrase(text, candidate) {
     };
   }
 
+  return findGappedPhrase(textWords, candidateWords);
+}
+
+function flexiblePhraseMatch(pattern, text) {
+  return Boolean(findMorphologicalPhrase(stripMarkup(text), stripMarkup(pattern)));
+}
+
+function placeholderPhraseMatch(pattern, text) {
+  const textWords = indexedMatchWords(text);
+  const patternWords = matchWords(pattern);
+  if (!textWords.length || !patternWords.length) return false;
+  if (!patternWords.some((word, index) => isPatternPlaceholder(word, patternWords, index))) {
+    return false;
+  }
+  return Boolean(findPlaceholderPhrase(textWords, patternWords));
+}
+
+function findPlaceholderPhrase(textWords, patternWords) {
+  const hasPlaceholder = patternWords.some((word, index) =>
+    isPatternPlaceholder(word, patternWords, index)
+  );
+  if (!hasPlaceholder) return null;
+
+  for (let start = 0; start < textWords.length; start += 1) {
+    const endIndex = matchPatternWords(textWords, patternWords, start, 0, 6);
+    if (endIndex == null || endIndex <= start) continue;
+    return {
+      start: textWords[start].start,
+      end: textWords[endIndex - 1].end,
+    };
+  }
+
   return null;
+}
+
+function matchPatternWords(textWords, patternWords, textIndex, patternIndex, gapBudget) {
+  if (patternIndex >= patternWords.length) return textIndex;
+  if (textIndex > textWords.length) return null;
+
+  const patternWord = patternWords[patternIndex];
+  if (isSpanPlaceholder(patternWord)) {
+    const remainingPatternWords = patternWords
+      .slice(patternIndex + 1)
+      .filter((word) => !isSpanPlaceholder(word)).length;
+    const maxLength = Math.min(
+      10,
+      textWords.length - textIndex - remainingPatternWords
+    );
+    for (let length = 0; length <= maxLength; length += 1) {
+      const result = matchPatternWords(
+        textWords,
+        patternWords,
+        textIndex + length,
+        patternIndex + 1,
+        gapBudget
+      );
+      if (result != null) return result;
+    }
+    return null;
+  }
+
+  if (textIndex >= textWords.length) return null;
+  if (
+    wordsMorphologicallyMatch(patternWord, textWords[textIndex].value) ||
+    isVerbPlaceholder(patternWord, patternWords, patternIndex)
+  ) {
+    return matchPatternWords(
+      textWords,
+      patternWords,
+      textIndex + 1,
+      patternIndex + 1,
+      gapBudget
+    );
+  }
+
+  if (patternIndex > 0 && gapBudget > 0) {
+    return matchPatternWords(
+      textWords,
+      patternWords,
+      textIndex + 1,
+      patternIndex,
+      gapBudget - 1
+    );
+  }
+
+  return null;
+}
+
+function findGappedPhrase(textWords, patternWords) {
+  if (patternWords.length < 2) return null;
+  const letterCount = patternWords.reduce((sum, word) => sum + word.length, 0);
+  if (letterCount < 6) return null;
+
+  for (let start = 0; start < textWords.length; start += 1) {
+    if (!wordsMorphologicallyMatch(patternWords[0], textWords[start].value)) continue;
+    const endIndex = matchPatternWords(
+      textWords,
+      patternWords,
+      start,
+      0,
+      6
+    );
+    if (endIndex == null || endIndex <= start) continue;
+    return {
+      start: textWords[start].start,
+      end: textWords[endIndex - 1].end,
+    };
+  }
+
+  return null;
+}
+
+function isPatternPlaceholder(word, patternWords, index) {
+  return (
+    isSpanPlaceholder(word) ||
+    isVerbPlaceholder(word, patternWords, index)
+  );
+}
+
+function isSpanPlaceholder(word) {
+  if (word === "A" || word === "B") return true;
+  return /^(something|someone|somebody|sth|sb)$/i.test(word);
+}
+
+function isVerbPlaceholder(word, patternWords, index) {
+  const normalized = String(word).toLowerCase();
+  if (patternWords.length <= 1) return false;
+  if (normalized === "doing") return true;
+  if (normalized !== "do") return false;
+  return index === patternWords.length - 1 || String(patternWords[index - 1]).toLowerCase() === "to";
 }
 
 function phraseWordsContain(container, part) {
@@ -1036,7 +1225,16 @@ function phraseWordsEqual(leftWords, rightWords) {
 function wordsMorphologicallyMatch(left, right) {
   const leftForms = wordForms(left);
   const rightForms = wordForms(right);
-  return [...leftForms].some((form) => rightForms.has(form));
+  if ([...leftForms].some((form) => rightForms.has(form))) return true;
+
+  const leftWord = String(left).toLowerCase();
+  const rightWord = String(right).toLowerCase();
+  return (
+    leftWord.length >= 5 &&
+    rightWord.length >= 5 &&
+    leftWord[0] === rightWord[0] &&
+    editDistance(leftWord, rightWord) <= 1
+  );
 }
 
 function wordForms(word) {
@@ -1046,6 +1244,8 @@ function wordForms(word) {
     .replace(/'s$/, "");
   const special = canonicalSpecialWord(normalized);
   const forms = new Set([normalized, special]);
+  const irregular = irregularWordForm(normalized);
+  if (irregular) forms.add(irregular);
 
   if (normalized.endsWith("ies") && normalized.length > 4) {
     forms.add(`${normalized.slice(0, -3)}y`);
@@ -1053,8 +1253,14 @@ function wordForms(word) {
   if (normalized.endsWith("s") && normalized.length > 3) {
     forms.add(normalized.slice(0, -1));
   }
-  if (normalized.endsWith("es") && normalized.length > 4) {
+  if (normalized.endsWith("es") && normalized.length > 3) {
     forms.add(normalized.slice(0, -2));
+  }
+  if (normalized.endsWith("ier") && normalized.length > 4) {
+    forms.add(`${normalized.slice(0, -3)}y`);
+  }
+  if (normalized.endsWith("iest") && normalized.length > 5) {
+    forms.add(`${normalized.slice(0, -4)}y`);
   }
   if (normalized.endsWith("ed") && normalized.length > 4) {
     addStemForms(forms, normalized.slice(0, -2));
@@ -1079,7 +1285,34 @@ function canonicalSpecialWord(word) {
   if (/^(did|does|done|doing)$/.test(word)) return "do";
   if (/^(has|had|having)$/.test(word)) return "have";
   if (/^(one|ones|his|her|their|our|my|your|its)$/.test(word)) return "possessive";
+  if (/^(oneself|myself|yourself|himself|herself|itself|ourselves|yourselves|themselves)$/.test(word)) {
+    return "reflexive";
+  }
+  if (/^(a|an|the)$/.test(word)) return "article";
   return word;
+}
+
+function irregularWordForm(word) {
+  const forms = {
+    brought: "bring",
+    bought: "buy",
+    came: "come",
+    found: "find",
+    gone: "go",
+    left: "leave",
+    lent: "lend",
+    made: "make",
+    paid: "pay",
+    ran: "run",
+    struck: "strike",
+    taken: "take",
+    thought: "think",
+    took: "take",
+    went: "go",
+    written: "write",
+    wrote: "write",
+  };
+  return forms[word] || "";
 }
 
 function matchWords(text) {
