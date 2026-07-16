@@ -189,6 +189,12 @@ function bindEvents() {
     const key = event.key.toLowerCase();
     if (!new Set(["q", "w", "e"]).has(key) || event.repeat) return;
 
+    if (key === "e" && els.sourceDialog.open) {
+      event.preventDefault();
+      closeSourceDialog();
+      return;
+    }
+
     if (key === "w") {
       const hasAnnotationTarget = Boolean(
         state.hoveredAnnotationId || hoveredEnglishTarget()
