@@ -66,6 +66,7 @@ const state = {
   annotations: loadAnnotations(),
   collapsedCourseIds: loadCollapsedCourseIds(),
   hoveredTermRow: null,
+  hoveredEnglishCell: null,
   hoveredAnnotationId: "",
   pendingAnnotation: null,
   revealedTermKeys: new Set(),
@@ -179,11 +180,11 @@ function bindEvents() {
 
     if (key === "w") {
       const hasAnnotationTarget = Boolean(
-        state.hoveredAnnotationId || selectedEnglishRange()
+        state.hoveredAnnotationId || hoveredEnglishTarget()
       );
       if (isEditableTarget(event.target) && !hasAnnotationTarget) return;
       event.preventDefault();
-      openAnnotationEditorFromHoverOrSelection();
+      openAnnotationEditorFromHover();
       return;
     }
 
@@ -246,6 +247,7 @@ function bindEvents() {
   els.content.addEventListener("mouseover", (event) => {
     if (state.touchMode) return;
     updateHoveredTermRow(event);
+    updateHoveredEnglishCell(event);
     updateHoveredAnnotation(event);
     if (!state.hoverReveal) return;
     const cloze = event.target.closest(".cloze.is-hidden");
@@ -255,6 +257,7 @@ function bindEvents() {
   els.content.addEventListener("mousemove", (event) => {
     if (!state.touchMode) {
       updateHoveredTermRow(event);
+      updateHoveredEnglishCell(event);
       updateHoveredAnnotation(event);
       positionAnnotationTooltip(event);
     }
@@ -262,11 +265,15 @@ function bindEvents() {
   els.content.addEventListener("pointerover", (event) => {
     if (!state.touchMode) {
       updateHoveredTermRow(event);
+      updateHoveredEnglishCell(event);
       updateHoveredAnnotation(event);
     }
   });
   els.content.addEventListener("pointermove", (event) => {
-    if (!state.touchMode) updateHoveredTermRow(event);
+    if (!state.touchMode) {
+      updateHoveredTermRow(event);
+      updateHoveredEnglishCell(event);
+    }
   });
 
   els.content.addEventListener("mouseout", (event) => {
@@ -274,6 +281,10 @@ function bindEvents() {
     if (row && !row.contains(event.relatedTarget)) clearHoveredTermRow(row);
 
     const cloze = event.target.closest(".cloze.is-hidden");
+    const englishCell = event.target.closest(".cloze-english-cell");
+    if (englishCell && !englishCell.contains(event.relatedTarget)) {
+      clearHoveredEnglishCell(englishCell);
+    }
     const annotation = event.target.closest(".cloze-annotation[data-annotation-id]");
     if (annotation && !annotation.contains(event.relatedTarget)) clearHoveredAnnotation(annotation);
     if (!cloze || cloze.contains(event.relatedTarget)) return;
@@ -283,6 +294,10 @@ function bindEvents() {
   els.content.addEventListener("pointerout", (event) => {
     const row = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
     if (row && !row.contains(event.relatedTarget)) clearHoveredTermRow(row);
+    const englishCell = event.target.closest(".cloze-english-cell");
+    if (englishCell && !englishCell.contains(event.relatedTarget)) {
+      clearHoveredEnglishCell(englishCell);
+    }
     const annotation = event.target.closest(".cloze-annotation[data-annotation-id]");
     if (annotation && !annotation.contains(event.relatedTarget)) clearHoveredAnnotation(annotation);
   });
@@ -613,6 +628,7 @@ function renderContent() {
   const exam = getActiveExam();
   if (!exam) return;
   state.hoveredTermRow = null;
+  state.hoveredEnglishCell = null;
   clearHoveredAnnotation();
 
   const cards = state.mode === "review" ? reviewCardsForExam(exam) : studyCardsForExam(exam);
@@ -800,7 +816,7 @@ function resolveAnnotationRange(annotation, english) {
   return { start: fallbackStart, end: fallbackStart + selectedText.length };
 }
 
-function openAnnotationEditorFromHoverOrSelection() {
+function openAnnotationEditorFromHover() {
   if (!isClozeExam(getActiveExam())) {
     showToast("W 注释仅用于完形表格");
     return;
@@ -812,25 +828,20 @@ function openAnnotationEditorFromHoverOrSelection() {
     return;
   }
 
-  const target = selectedEnglishRange();
+  const target = hoveredEnglishTarget();
   if (!target) {
-    showToast("请先拖选要注释的英文");
+    showToast("请把鼠标悬停在英文词条上");
     return;
   }
 
-  const overlaps = Object.values(state.annotations).some((annotation) => {
-    if (
-      annotation.deletedAt ||
-      annotation.examId !== target.examId ||
-      annotation.cardId !== target.cardId
-    ) {
-      return false;
-    }
-    const range = resolveAnnotationRange(annotation, target.english);
-    return range && target.start < range.end && target.end > range.start;
-  });
-  if (overlaps) {
-    showToast("这段英文已有注释，请悬停后按 W 修改");
+  const existingForTerm = Object.values(state.annotations).find(
+    (annotation) =>
+      !annotation.deletedAt &&
+      annotation.examId === target.examId &&
+      annotation.cardId === target.cardId
+  );
+  if (existingForTerm) {
+    openAnnotationDialog(existingForTerm);
     return;
   }
 
@@ -846,44 +857,20 @@ function openAnnotationEditorFromHoverOrSelection() {
   }, true);
 }
 
-function selectedEnglishRange() {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+function hoveredEnglishTarget() {
+  const cell = state.hoveredEnglishCell;
+  if (!cell || !document.body.contains(cell)) return null;
 
-  const range = selection.getRangeAt(0);
-  const startCell = elementFromNode(range.startContainer)?.closest(".cloze-english-cell");
-  const endCell = elementFromNode(range.endContainer)?.closest(".cloze-english-cell");
-  if (!startCell || startCell !== endCell) return null;
-
-  const row = startCell.closest(".cloze-table-row[data-card-id]");
-  if (!row) return null;
-
-  const prefix = document.createRange();
-  prefix.selectNodeContents(startCell);
-  prefix.setEnd(range.startContainer, range.startOffset);
-  let start = prefix.toString().length;
-  let selectedText = range.toString();
-  const leadingWhitespace = selectedText.match(/^\s*/)?.[0].length || 0;
-  const trailingWhitespace = selectedText.match(/\s*$/)?.[0].length || 0;
-  start += leadingWhitespace;
-  selectedText = selectedText.slice(
-    leadingWhitespace,
-    trailingWhitespace ? -trailingWhitespace : undefined
-  );
-  if (!selectedText) return null;
-
+  const row = cell.closest(".cloze-table-row[data-card-id]");
+  const selectedText = cell.textContent?.trim() || "";
+  if (!row || !selectedText) return null;
   return {
     examId: row.dataset.examId,
     cardId: row.dataset.cardId,
-    english: startCell.textContent || "",
-    start,
-    end: start + selectedText.length,
+    start: 0,
+    end: selectedText.length,
     selectedText,
   };
-}
-
-function elementFromNode(node) {
-  return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
 }
 
 function openAnnotationDialog(annotation, isNew = false) {
@@ -924,7 +911,6 @@ function savePendingAnnotation() {
   state.annotations[annotation.id] = annotation;
   saveAnnotations();
   closeAnnotationDialog();
-  window.getSelection()?.removeAllRanges();
   renderContent();
   syncAnnotationMutation(annotation);
   showToast(pending.isNew ? "注释已添加" : "注释已更新");
@@ -2183,6 +2169,23 @@ function updateHoveredTermRow(event) {
   if (state.hoveredTermRow && !state.hoveredTermRow.contains(event.target)) {
     clearHoveredTermRow();
   }
+}
+
+function updateHoveredEnglishCell(event) {
+  const cell = event.target.closest?.(".cloze-english-cell");
+  if (cell) {
+    state.hoveredEnglishCell = cell;
+    return;
+  }
+
+  if (state.hoveredEnglishCell && !state.hoveredEnglishCell.contains(event.target)) {
+    clearHoveredEnglishCell();
+  }
+}
+
+function clearHoveredEnglishCell(cell = state.hoveredEnglishCell) {
+  if (!cell || state.hoveredEnglishCell !== cell) return;
+  state.hoveredEnglishCell = null;
 }
 
 function updateHoveredAnnotation(event) {

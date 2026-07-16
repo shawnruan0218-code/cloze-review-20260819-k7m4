@@ -687,10 +687,15 @@ button {
 .cloze-english-cell {
   width: 34%;
   font-weight: 700;
+  transition: background 0.15s ease;
+}
+
+.cloze-english-cell:hover {
+  background: rgba(20, 116, 111, 0.08);
 }
 
 .cloze-english-text {
-  cursor: text;
+  cursor: help;
   user-select: text;
   -webkit-user-select: text;
 }
