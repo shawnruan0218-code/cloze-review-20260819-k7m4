@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>英语 Cloze 复习库</title>
-    <link rel="stylesheet" href="./styles.css?v=20260711-round-protection" />
+    <link rel="stylesheet" href="./styles.css?v=20260716-cloze-annotations" />
   </head>
   <body>
     <div class="app-shell">
@@ -82,10 +82,30 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+    <dialog class="annotation-dialog" id="annotationDialog" aria-labelledby="annotationTitle">
+      <div class="annotation-dialog-head">
+        <div>
+          <span>英文注释</span>
+          <strong id="annotationTitle">添加注释</strong>
+        </div>
+        <button class="annotation-close" id="annotationCancel" type="button" aria-label="关闭" title="关闭">×</button>
+      </div>
+      <div class="annotation-selection" id="annotationSelection"></div>
+      <label class="annotation-field">
+        <span>注释内容</span>
+        <textarea id="annotationInput" rows="5" maxlength="1000" placeholder="写下这处用法、辨析或提醒"></textarea>
+      </label>
+      <div class="annotation-actions">
+        <button class="annotation-delete" id="annotationDelete" type="button">删除</button>
+        <button class="annotation-save" id="annotationSave" type="button">保存</button>
+      </div>
+    </dialog>
+    <div class="annotation-tooltip" id="annotationTooltip" role="tooltip" hidden></div>
+
     <script src="./data.js?v=20260711-2007-highlights"></script>
     <script src="./data-english2.js"></script>
     <script src="./data-cloze.js"></script>
     <script src="./sync-config.js"></script>
-    <script src="./app.js?v=20260712-english2-highlights"></script>
+    <script src="./app.js?v=20260716-cloze-annotations"></script>
   </body>
 </html>

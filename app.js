@@ -5,12 +5,14 @@ const AUTH_SESSION_KEY = "cloze-review-supabase-session";
 const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
 const FONT_SIZE_KEY = "cloze-review-font-size";
 const REVIEW_ROUND_KEY = "cloze-review-active-round";
+const ANNOTATION_STORAGE_KEY = "cloze-review-annotations-v1";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
 const FONT_SIZES = new Set(["small", "medium", "large"]);
 const CLOUD_PAGE_SIZE = 1000;
 const CLOUD_WRITE_BATCH_SIZE = 500;
 const MAX_REVIEW_ROUND = 4;
 const CLOUD_ROUND_MARKER = "::review-round-";
+const CLOUD_ANNOTATION_MARKER = "::cloze-annotation::";
 
 const els = {
   yearList: document.querySelector("#yearList"),
@@ -37,6 +39,13 @@ const els = {
   statsStrip: document.querySelector("#statsStrip"),
   content: document.querySelector("#content"),
   toast: document.querySelector("#toast"),
+  annotationDialog: document.querySelector("#annotationDialog"),
+  annotationSelection: document.querySelector("#annotationSelection"),
+  annotationInput: document.querySelector("#annotationInput"),
+  annotationCancel: document.querySelector("#annotationCancel"),
+  annotationDelete: document.querySelector("#annotationDelete"),
+  annotationSave: document.querySelector("#annotationSave"),
+  annotationTooltip: document.querySelector("#annotationTooltip"),
 };
 
 const syncConfig = normalizeSyncConfig(window.SYNC_CONFIG || {});
@@ -54,8 +63,11 @@ const state = {
   touchMode: touchModeMedia.matches,
   query: "",
   library: loadLibrary(),
+  annotations: loadAnnotations(),
   collapsedCourseIds: loadCollapsedCourseIds(),
   hoveredTermRow: null,
+  hoveredAnnotationId: "",
+  pendingAnnotation: null,
   revealedTermKeys: new Set(),
   authSession: loadAuthSession(),
   syncConfigured: Boolean(syncConfig.supabaseUrl && syncConfig.supabaseAnonKey),
@@ -133,6 +145,13 @@ function bindEvents() {
   els.signUpButton.addEventListener("click", () => signUp());
   els.syncNowButton.addEventListener("click", () => syncFromCloud({ mergeLocal: true }));
   els.signOutButton.addEventListener("click", () => signOut());
+  els.annotationCancel.addEventListener("click", () => closeAnnotationDialog());
+  els.annotationDelete.addEventListener("click", () => deletePendingAnnotation());
+  els.annotationSave.addEventListener("click", () => savePendingAnnotation());
+  els.annotationDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeAnnotationDialog();
+  });
 
   els.searchInput.addEventListener("input", (event) => {
     state.query = event.target.value.trim().toLowerCase();
@@ -155,7 +174,19 @@ function bindEvents() {
 
   document.addEventListener("keydown", (event) => {
     if (state.touchMode) return;
-    if (event.key.toLowerCase() !== "q" || event.repeat) return;
+    const key = event.key.toLowerCase();
+    if (!new Set(["q", "w"]).has(key) || event.repeat) return;
+
+    if (key === "w") {
+      const hasAnnotationTarget = Boolean(
+        state.hoveredAnnotationId || selectedEnglishRange()
+      );
+      if (isEditableTarget(event.target) && !hasAnnotationTarget) return;
+      event.preventDefault();
+      openAnnotationEditorFromHoverOrSelection();
+      return;
+    }
+
     if (isEditableTarget(event.target)) return;
 
     const row = state.hoveredTermRow;
@@ -215,16 +246,24 @@ function bindEvents() {
   els.content.addEventListener("mouseover", (event) => {
     if (state.touchMode) return;
     updateHoveredTermRow(event);
+    updateHoveredAnnotation(event);
     if (!state.hoverReveal) return;
     const cloze = event.target.closest(".cloze.is-hidden");
     if (cloze) cloze.classList.add("is-hovered");
   });
 
   els.content.addEventListener("mousemove", (event) => {
-    if (!state.touchMode) updateHoveredTermRow(event);
+    if (!state.touchMode) {
+      updateHoveredTermRow(event);
+      updateHoveredAnnotation(event);
+      positionAnnotationTooltip(event);
+    }
   });
   els.content.addEventListener("pointerover", (event) => {
-    if (!state.touchMode) updateHoveredTermRow(event);
+    if (!state.touchMode) {
+      updateHoveredTermRow(event);
+      updateHoveredAnnotation(event);
+    }
   });
   els.content.addEventListener("pointermove", (event) => {
     if (!state.touchMode) updateHoveredTermRow(event);
@@ -235,6 +274,8 @@ function bindEvents() {
     if (row && !row.contains(event.relatedTarget)) clearHoveredTermRow(row);
 
     const cloze = event.target.closest(".cloze.is-hidden");
+    const annotation = event.target.closest(".cloze-annotation[data-annotation-id]");
+    if (annotation && !annotation.contains(event.relatedTarget)) clearHoveredAnnotation(annotation);
     if (!cloze || cloze.contains(event.relatedTarget)) return;
     cloze.classList.remove("is-hovered");
   });
@@ -242,6 +283,8 @@ function bindEvents() {
   els.content.addEventListener("pointerout", (event) => {
     const row = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
     if (row && !row.contains(event.relatedTarget)) clearHoveredTermRow(row);
+    const annotation = event.target.closest(".cloze-annotation[data-annotation-id]");
+    if (annotation && !annotation.contains(event.relatedTarget)) clearHoveredAnnotation(annotation);
   });
 }
 
@@ -570,6 +613,7 @@ function renderContent() {
   const exam = getActiveExam();
   if (!exam) return;
   state.hoveredTermRow = null;
+  clearHoveredAnnotation();
 
   const cards = state.mode === "review" ? reviewCardsForExam(exam) : studyCardsForExam(exam);
   const filtered = filterCards(cards);
@@ -689,7 +733,8 @@ function renderClozeTableRow(card) {
       ? "移出整个复习库"
       : "加入复习库";
   const disabled = removalLocked ? " disabled" : "";
-  const english = escapeHtml(stripMarkup(card.sentenceLines.join(" ")).trim());
+  const englishText = stripMarkup(card.sentenceLines.join(" ")).trim();
+  const english = renderAnnotatedEnglish(card.examId, card.id, englishText);
   const meaning = card.translationLine.replace(/^翻译\s*[:：]\s*/, "");
 
   return `
@@ -700,10 +745,211 @@ function renderClozeTableRow(card) {
           ${state.mode === "review" ? renderAdvanceButton(card, term) : ""}
         </div>
       </td>
-      <td class="cloze-english-cell">${english}</td>
+      <td class="cloze-english-cell" tabindex="-1"><span class="cloze-english-text">${english}</span></td>
       <td class="cloze-meaning-cell">${renderInline(meaning, "translation", null, revealTerm)}</td>
     </tr>
   `;
+}
+
+function renderAnnotatedEnglish(examId, cardId, english) {
+  const annotations = Object.values(state.annotations)
+    .filter(
+      (annotation) =>
+        !annotation.deletedAt &&
+        annotation.examId === examId &&
+        annotation.cardId === cardId
+    )
+    .map((annotation) => ({
+      annotation,
+      range: resolveAnnotationRange(annotation, english),
+    }))
+    .filter((entry) => entry.range)
+    .sort((left, right) => left.range.start - right.range.start);
+
+  if (!annotations.length) return escapeHtml(english);
+
+  let cursor = 0;
+  let html = "";
+  annotations.forEach(({ annotation, range }) => {
+    if (range.start < cursor) return;
+    html += escapeHtml(english.slice(cursor, range.start));
+    html += `<mark class="cloze-annotation" data-annotation-id="${escapeHtml(annotation.id)}" tabindex="0">${escapeHtml(english.slice(range.start, range.end))}</mark>`;
+    cursor = range.end;
+  });
+  html += escapeHtml(english.slice(cursor));
+  return html;
+}
+
+function resolveAnnotationRange(annotation, english) {
+  const start = Number(annotation.start);
+  const end = Number(annotation.end);
+  if (
+    Number.isInteger(start) &&
+    Number.isInteger(end) &&
+    start >= 0 &&
+    end > start &&
+    english.slice(start, end) === annotation.selectedText
+  ) {
+    return { start, end };
+  }
+
+  const selectedText = String(annotation.selectedText || "");
+  if (!selectedText) return null;
+  const fallbackStart = english.indexOf(selectedText);
+  if (fallbackStart < 0) return null;
+  return { start: fallbackStart, end: fallbackStart + selectedText.length };
+}
+
+function openAnnotationEditorFromHoverOrSelection() {
+  if (!isClozeExam(getActiveExam())) {
+    showToast("W 注释仅用于完形表格");
+    return;
+  }
+
+  const existing = state.annotations[state.hoveredAnnotationId];
+  if (existing && !existing.deletedAt) {
+    openAnnotationDialog(existing);
+    return;
+  }
+
+  const target = selectedEnglishRange();
+  if (!target) {
+    showToast("请先拖选要注释的英文");
+    return;
+  }
+
+  const overlaps = Object.values(state.annotations).some((annotation) => {
+    if (
+      annotation.deletedAt ||
+      annotation.examId !== target.examId ||
+      annotation.cardId !== target.cardId
+    ) {
+      return false;
+    }
+    const range = resolveAnnotationRange(annotation, target.english);
+    return range && target.start < range.end && target.end > range.start;
+  });
+  if (overlaps) {
+    showToast("这段英文已有注释，请悬停后按 W 修改");
+    return;
+  }
+
+  openAnnotationDialog({
+    id: createAnnotationId(),
+    examId: target.examId,
+    cardId: target.cardId,
+    start: target.start,
+    end: target.end,
+    selectedText: target.selectedText,
+    note: "",
+    createdAt: new Date().toISOString(),
+  }, true);
+}
+
+function selectedEnglishRange() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+
+  const range = selection.getRangeAt(0);
+  const startCell = elementFromNode(range.startContainer)?.closest(".cloze-english-cell");
+  const endCell = elementFromNode(range.endContainer)?.closest(".cloze-english-cell");
+  if (!startCell || startCell !== endCell) return null;
+
+  const row = startCell.closest(".cloze-table-row[data-card-id]");
+  if (!row) return null;
+
+  const prefix = document.createRange();
+  prefix.selectNodeContents(startCell);
+  prefix.setEnd(range.startContainer, range.startOffset);
+  let start = prefix.toString().length;
+  let selectedText = range.toString();
+  const leadingWhitespace = selectedText.match(/^\s*/)?.[0].length || 0;
+  const trailingWhitespace = selectedText.match(/\s*$/)?.[0].length || 0;
+  start += leadingWhitespace;
+  selectedText = selectedText.slice(
+    leadingWhitespace,
+    trailingWhitespace ? -trailingWhitespace : undefined
+  );
+  if (!selectedText) return null;
+
+  return {
+    examId: row.dataset.examId,
+    cardId: row.dataset.cardId,
+    english: startCell.textContent || "",
+    start,
+    end: start + selectedText.length,
+    selectedText,
+  };
+}
+
+function elementFromNode(node) {
+  return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+}
+
+function openAnnotationDialog(annotation, isNew = false) {
+  state.pendingAnnotation = { ...annotation, isNew };
+  els.annotationSelection.textContent = annotation.selectedText;
+  els.annotationInput.value = annotation.note || "";
+  els.annotationDelete.hidden = isNew;
+  els.annotationDialog.showModal();
+  requestAnimationFrame(() => els.annotationInput.focus());
+}
+
+function closeAnnotationDialog() {
+  if (els.annotationDialog.open) els.annotationDialog.close();
+  state.pendingAnnotation = null;
+}
+
+function savePendingAnnotation() {
+  const pending = state.pendingAnnotation;
+  if (!pending) return;
+  const note = els.annotationInput.value.trim();
+  if (!note) {
+    showToast("请输入注释内容");
+    els.annotationInput.focus();
+    return;
+  }
+
+  const annotation = {
+    id: pending.id,
+    examId: pending.examId,
+    cardId: pending.cardId,
+    start: pending.start,
+    end: pending.end,
+    selectedText: pending.selectedText,
+    note,
+    createdAt: pending.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  state.annotations[annotation.id] = annotation;
+  saveAnnotations();
+  closeAnnotationDialog();
+  window.getSelection()?.removeAllRanges();
+  renderContent();
+  syncAnnotationMutation(annotation);
+  showToast(pending.isNew ? "注释已添加" : "注释已更新");
+}
+
+function deletePendingAnnotation() {
+  const pending = state.pendingAnnotation;
+  if (!pending || pending.isNew) return;
+  const annotation = {
+    ...pending,
+    deletedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  delete annotation.isNew;
+  state.annotations[annotation.id] = annotation;
+  saveAnnotations();
+  closeAnnotationDialog();
+  renderContent();
+  syncAnnotationMutation(annotation);
+  showToast("注释已删除");
+}
+
+function createAnnotationId() {
+  return globalThis.crypto?.randomUUID?.() ||
+    `note-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 function renderSentence(card, selectedTerms = null) {
@@ -1525,10 +1771,11 @@ async function syncFromCloud({ mergeLocal = false, silent = false } = {}) {
   setSyncBusy(true, silent ? "" : "正在同步");
   try {
     await refreshSessionIfNeeded();
-    const remoteLibrary = await fetchCloudLibrary();
+    const { library: remoteLibrary, annotations: remoteAnnotations } = await fetchCloudState();
     const nextLibrary = mergeLocal
       ? mergeReviewLibraries(remoteLibrary, state.library)
       : remoteLibrary;
+    const nextAnnotations = mergeAnnotations(remoteAnnotations, state.annotations);
 
     if (mergeLocal) {
       const missingItems = Object.entries(nextLibrary)
@@ -1539,8 +1786,15 @@ async function syncFromCloud({ mergeLocal = false, silent = false } = {}) {
       if (missingItems.length) await upsertCloudItems(missingItems);
     }
 
+    const pendingAnnotations = Object.values(nextAnnotations)
+      .filter((annotation) => annotationIsNewer(annotation, remoteAnnotations[annotation.id]))
+      .map((annotation) => cloudAnnotationFromLocal(annotation));
+    if (pendingAnnotations.length) await upsertCloudItems(pendingAnnotations);
+
     state.library = nextLibrary;
+    state.annotations = nextAnnotations;
     saveLibrary();
+    saveAnnotations();
     renderYearList();
     renderStats();
     renderContent();
@@ -1577,7 +1831,21 @@ async function syncItemMutation(action, item, key, round = 1) {
   }
 }
 
-async function fetchCloudLibrary() {
+async function syncAnnotationMutation(annotation) {
+  if (!state.syncConfigured || !state.authSession) return;
+
+  try {
+    await refreshSessionIfNeeded();
+    await upsertCloudItems([cloudAnnotationFromLocal(annotation)]);
+    state.syncMessage = "注释已同步";
+    renderSyncPanel();
+  } catch (error) {
+    state.syncMessage = `注释已保存在本机，云同步失败：${readableError(error)}`;
+    renderSyncPanel();
+  }
+}
+
+async function fetchCloudState() {
   const rows = [];
 
   for (let offset = 0; ; offset += CLOUD_PAGE_SIZE) {
@@ -1589,10 +1857,16 @@ async function fetchCloudLibrary() {
     if (page.length < CLOUD_PAGE_SIZE) break;
   }
 
-  return rows.reduce((library, row) => {
+  return rows.reduce((cloudState, row) => {
+    if (isCloudAnnotationKey(row.item_key)) {
+      const annotation = parseCloudAnnotation(row);
+      if (annotation) cloudState.annotations[annotation.id] = annotation;
+      return cloudState;
+    }
+
     const { baseKey, round } = parseCloudItemKey(row.item_key);
-    const existing = library[baseKey];
-    library[baseKey] = {
+    const existing = cloudState.library[baseKey];
+    cloudState.library[baseKey] = {
       ...existing,
       examId: row.exam_id,
       cardId: row.card_id,
@@ -1600,8 +1874,8 @@ async function fetchCloudLibrary() {
       addedAt: existing?.addedAt || row.added_at,
       reviewRound: Math.max(reviewRoundOf(existing), round),
     };
-    return library;
-  }, {});
+    return cloudState;
+  }, { library: {}, annotations: {} });
 }
 
 async function upsertCloudItems(items) {
@@ -1658,6 +1932,75 @@ function cloudItemFromLocal(key, item, round = 1) {
     added_at: item.addedAt || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+}
+
+function cloudAnnotationFromLocal(annotation) {
+  const cloudKey = `${CLOUD_ANNOTATION_MARKER}${annotation.id}`;
+  return {
+    id: cloudIdForKey(cloudKey),
+    user_id: state.authSession?.user?.id,
+    item_key: cloudKey,
+    exam_id: annotation.examId,
+    card_id: annotation.cardId,
+    term_id: JSON.stringify({
+      id: annotation.id,
+      start: annotation.start,
+      end: annotation.end,
+      selectedText: annotation.selectedText,
+      note: annotation.note,
+      createdAt: annotation.createdAt,
+      updatedAt: annotation.updatedAt,
+      deletedAt: annotation.deletedAt || null,
+    }),
+    added_at: annotation.createdAt || new Date().toISOString(),
+    updated_at: annotation.updatedAt || new Date().toISOString(),
+  };
+}
+
+function isCloudAnnotationKey(key) {
+  return String(key).startsWith(CLOUD_ANNOTATION_MARKER);
+}
+
+function parseCloudAnnotation(row) {
+  try {
+    const data = JSON.parse(row.term_id || "{}");
+    const id = String(data.id || row.item_key.slice(CLOUD_ANNOTATION_MARKER.length));
+    if (!id || !data.selectedText) return null;
+    return {
+      id,
+      examId: row.exam_id,
+      cardId: row.card_id,
+      start: Number(data.start),
+      end: Number(data.end),
+      selectedText: String(data.selectedText),
+      note: String(data.note || ""),
+      createdAt: data.createdAt || row.added_at,
+      updatedAt: data.updatedAt || data.createdAt || row.added_at,
+      deletedAt: data.deletedAt || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeAnnotations(remoteAnnotations, localAnnotations) {
+  const merged = { ...remoteAnnotations };
+  Object.entries(localAnnotations).forEach(([id, localAnnotation]) => {
+    const remoteAnnotation = merged[id];
+    if (annotationIsNewer(localAnnotation, remoteAnnotation)) {
+      merged[id] = localAnnotation;
+    }
+  });
+  return merged;
+}
+
+function annotationIsNewer(candidate, existing) {
+  if (!existing) return true;
+  return annotationTimestamp(candidate) > annotationTimestamp(existing);
+}
+
+function annotationTimestamp(annotation) {
+  return Date.parse(annotation?.updatedAt || annotation?.createdAt || 0) || 0;
 }
 
 function cloudIdForKey(key) {
@@ -1842,6 +2185,37 @@ function updateHoveredTermRow(event) {
   }
 }
 
+function updateHoveredAnnotation(event) {
+  const element = event.target.closest?.(".cloze-annotation[data-annotation-id]");
+  if (!element) {
+    if (state.hoveredAnnotationId) clearHoveredAnnotation();
+    return;
+  }
+
+  const annotation = state.annotations[element.dataset.annotationId];
+  if (!annotation || annotation.deletedAt) return;
+  state.hoveredAnnotationId = annotation.id;
+  els.annotationTooltip.textContent = annotation.note;
+  els.annotationTooltip.hidden = false;
+}
+
+function positionAnnotationTooltip(event) {
+  if (els.annotationTooltip.hidden) return;
+  const margin = 14;
+  const tooltipRect = els.annotationTooltip.getBoundingClientRect();
+  const left = Math.min(event.clientX, window.innerWidth - tooltipRect.width - margin);
+  const top = Math.min(event.clientY, window.innerHeight - tooltipRect.height - margin);
+  els.annotationTooltip.style.left = `${Math.max(margin, left)}px`;
+  els.annotationTooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+function clearHoveredAnnotation(element = null) {
+  if (element && element.dataset.annotationId !== state.hoveredAnnotationId) return;
+  state.hoveredAnnotationId = "";
+  els.annotationTooltip.hidden = true;
+  els.annotationTooltip.textContent = "";
+}
+
 function setHoveredTermRow(row) {
   if (state.hoveredTermRow === row) return;
   clearHoveredTermRow();
@@ -1896,6 +2270,19 @@ function loadLibrary() {
 
 function saveLibrary() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.library));
+}
+
+function loadAnnotations() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ANNOTATION_STORAGE_KEY) || "{}");
+    return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAnnotations() {
+  localStorage.setItem(ANNOTATION_STORAGE_KEY, JSON.stringify(state.annotations));
 }
 
 function loadCollapsedCourseIds() {
