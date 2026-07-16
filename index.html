@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>英语 Cloze 复习库</title>
-    <link rel="stylesheet" href="./styles.css?v=20260716-cloze-hover-notes" />
+    <link rel="stylesheet" href="./styles.css?v=20260716-cloze-source-context" />
   </head>
   <body>
     <div class="app-shell">
@@ -82,6 +82,24 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+    <dialog class="source-dialog" id="sourceDialog" aria-labelledby="sourceTitle">
+      <div class="annotation-dialog-head">
+        <div>
+          <span>原句回看</span>
+          <strong id="sourceTitle">词条原句</strong>
+        </div>
+        <button class="annotation-close" id="sourceClose" type="button" aria-label="关闭" title="关闭">×</button>
+      </div>
+      <div class="source-dialog-body">
+        <div class="source-sentence" id="sourceSentence"></div>
+        <div class="source-translation">
+          <span>翻译：</span>
+          <p id="sourceTranslation"></p>
+        </div>
+        <p class="source-note" id="sourceNote" hidden>该词已放回对应空位，便于查看它在句中的搭配。</p>
+      </div>
+    </dialog>
+
     <dialog class="annotation-dialog" id="annotationDialog" aria-labelledby="annotationTitle">
       <div class="annotation-dialog-head">
         <div>
@@ -104,8 +122,8 @@
 
     <script src="./data.js?v=20260716-english1-2018-corrected"></script>
     <script src="./data-english2.js?v=20260716-english2-2022"></script>
-    <script src="./data-cloze.js"></script>
+    <script src="./data-cloze.js?v=20260716-cloze-source-context"></script>
     <script src="./sync-config.js"></script>
-    <script src="./app.js?v=20260716-2012-layout"></script>
+    <script src="./app.js?v=20260716-cloze-source-context"></script>
   </body>
 </html>

@@ -39,6 +39,12 @@ const els = {
   statsStrip: document.querySelector("#statsStrip"),
   content: document.querySelector("#content"),
   toast: document.querySelector("#toast"),
+  sourceDialog: document.querySelector("#sourceDialog"),
+  sourceTitle: document.querySelector("#sourceTitle"),
+  sourceSentence: document.querySelector("#sourceSentence"),
+  sourceTranslation: document.querySelector("#sourceTranslation"),
+  sourceNote: document.querySelector("#sourceNote"),
+  sourceClose: document.querySelector("#sourceClose"),
   annotationDialog: document.querySelector("#annotationDialog"),
   annotationSelection: document.querySelector("#annotationSelection"),
   annotationInput: document.querySelector("#annotationInput"),
@@ -146,6 +152,11 @@ function bindEvents() {
   els.signUpButton.addEventListener("click", () => signUp());
   els.syncNowButton.addEventListener("click", () => syncFromCloud({ mergeLocal: true }));
   els.signOutButton.addEventListener("click", () => signOut());
+  els.sourceClose.addEventListener("click", () => closeSourceDialog());
+  els.sourceDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeSourceDialog();
+  });
   els.annotationCancel.addEventListener("click", () => closeAnnotationDialog());
   els.annotationDelete.addEventListener("click", () => deletePendingAnnotation());
   els.annotationSave.addEventListener("click", () => savePendingAnnotation());
@@ -176,7 +187,7 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (state.touchMode) return;
     const key = event.key.toLowerCase();
-    if (!new Set(["q", "w"]).has(key) || event.repeat) return;
+    if (!new Set(["q", "w", "e"]).has(key) || event.repeat) return;
 
     if (key === "w") {
       const hasAnnotationTarget = Boolean(
@@ -194,6 +205,10 @@ function bindEvents() {
     if (!row || !document.body.contains(row)) return;
 
     event.preventDefault();
+    if (key === "e") {
+      openSourceDialogFromHover(row);
+      return;
+    }
     handleHoveredTermShortcut(row);
   });
 
@@ -412,6 +427,9 @@ function termSignature(term) {
 
 function parseBlock(file, raw, index) {
   const explicitIdMatch = raw.match(/<!--\s*card-id:\s*([a-z0-9_-]+)\s*-->/i);
+  const sourceContext = explicitIdMatch
+    ? file.clozeContexts?.[explicitIdMatch[1]] || null
+    : null;
   const lines = raw
     .split("\n")
     .filter((line) => !/^<!--\s*card-id:/i.test(line.trim()));
@@ -452,6 +470,7 @@ function parseBlock(file, raw, index) {
     translationLine,
     terms,
     clozeCount,
+    sourceContext,
     searchableText: stripMarkup(raw).toLowerCase(),
   };
 }
@@ -904,6 +923,35 @@ function resolveAnnotationRange(annotation, english) {
   const fallbackStart = english.indexOf(selectedText);
   if (fallbackStart < 0) return null;
   return { start: fallbackStart, end: fallbackStart + selectedText.length };
+}
+
+function openSourceDialogFromHover(row) {
+  const exam = getActiveExam();
+  if (!isClozeExam(exam)) return;
+
+  const card = exam.cards.find(
+    (candidate) =>
+      candidate.type === "card" &&
+      (candidate.id === row.dataset.cardId ||
+        storageCardId(candidate) === row.dataset.cardId)
+  );
+  const term = card?.terms?.find((candidate) => candidate.id === row.dataset.termId);
+  const context = card?.sourceContext;
+
+  if (!context?.sentence || !context?.translation) {
+    showToast("这个词条没有对应的文章原句");
+    return;
+  }
+
+  els.sourceTitle.textContent = term?.title || "词条原句";
+  els.sourceSentence.innerHTML = renderInline(context.sentence, "sentence");
+  els.sourceTranslation.textContent = context.translation;
+  els.sourceNote.hidden = !context.substituted;
+  els.sourceDialog.showModal();
+}
+
+function closeSourceDialog() {
+  if (els.sourceDialog.open) els.sourceDialog.close();
 }
 
 function openAnnotationEditorFromHover() {
