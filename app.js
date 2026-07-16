@@ -310,7 +310,9 @@ function parseExam(file) {
     .map((block) => block.trim())
     .filter(Boolean);
 
-  const cards = blocks.map((block, index) => parseBlock(file, block, index));
+  const cards = blocks.flatMap((block, index) =>
+    expandEmbeddedSeparatorBlock(file, block, index)
+  );
   const termCount = cards.reduce((sum, card) => sum + (card.terms?.length || 0), 0);
   const clozeCount = cards.reduce((sum, card) => sum + (card.clozeCount || 0), 0);
 
@@ -320,6 +322,92 @@ function parseExam(file) {
     termCount,
     clozeCount,
   };
+}
+
+function expandEmbeddedSeparatorBlock(file, raw, index) {
+  if (file.id !== "year-2012") return [parseBlock(file, raw, index)];
+
+  const legacyCard = parseBlock(file, raw, index);
+  const parts = raw
+    .split(/^⸻\s*$/m)
+    .flatMap(splitReadingSectionParts)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 1) return [legacyCard];
+
+  const legacyTerms = legacyCard.terms || [];
+  let legacyTermCursor = 0;
+  let fallbackTermIndex = legacyTerms.length;
+
+  return parts.map((part, partIndex) => {
+    const card = parseBlock(file, part, index);
+    const terms = (card.terms || []).map((term) => {
+      const signature = termSignature(term);
+      let legacyIndex = legacyTerms.findIndex(
+        (legacyTerm, candidateIndex) =>
+          candidateIndex >= legacyTermCursor &&
+          termSignature(legacyTerm) === signature
+      );
+      if (legacyIndex < 0) {
+        legacyIndex = legacyTerms.findIndex(
+          (legacyTerm, candidateIndex) =>
+            candidateIndex >= legacyTermCursor &&
+            normalizeMatchText(legacyTerm.title) === normalizeMatchText(term.title)
+        );
+      }
+
+      if (legacyIndex >= 0) {
+        legacyTermCursor = legacyIndex + 1;
+        return { ...term, id: legacyTerms[legacyIndex].id };
+      }
+
+      const fallbackId = `term-${fallbackTermIndex}`;
+      fallbackTermIndex += 1;
+      return { ...term, id: fallbackId };
+    });
+
+    return {
+      ...card,
+      id: `${legacyCard.id}-part-${partIndex}`,
+      storageCardId: legacyCard.id,
+      terms,
+    };
+  });
+}
+
+function splitReadingSectionParts(raw) {
+  const parts = [];
+  let current = [];
+
+  const pushCurrent = () => {
+    const content = current.join("\n").trim();
+    if (content) parts.push(content);
+    current = [];
+  };
+
+  raw.split("\n").forEach((line) => {
+    const cleaned = line.trim();
+    const isSectionHeading =
+      /^#{1,6}\s+/.test(cleaned) ||
+      /^第[一二三四五六七八九十]+篇(?:阅读)?$/.test(cleaned);
+    if (!isSectionHeading) {
+      current.push(line);
+      return;
+    }
+
+    pushCurrent();
+    parts.push(cleaned.replace(/^#{1,6}\s+/, ""));
+  });
+
+  pushCurrent();
+  return parts;
+}
+
+function termSignature(term) {
+  return stripMarkup(term?.lines?.[0] || term?.title || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function parseBlock(file, raw, index) {
@@ -614,7 +702,9 @@ function renderStats() {
   const activeRoundItems = reviewItems.filter(
     (item) => reviewRoundOf(item) >= state.reviewRound
   );
-  const reviewCards = new Set(activeRoundItems.map((item) => item.cardId)).size;
+  const reviewCards = state.mode === "review"
+    ? reviewCardsForExam(exam).length
+    : new Set(activeRoundItems.map((item) => item.cardId)).size;
   const clozeExam = isClozeExam(exam);
 
   els.statsStrip.innerHTML = `
@@ -667,7 +757,7 @@ function reviewCardsForExam(exam) {
     .map((card) => ({
       ...card,
       terms: card.terms.filter((term) =>
-        isInReviewRound(exam.id, card.id, term.id, state.reviewRound)
+        isInReviewRound(exam.id, storageCardId(card), term.id, state.reviewRound)
       ),
     }))
     .filter((card) => card.terms.length > 0);
@@ -1086,12 +1176,13 @@ function renderTranslation(card) {
 
 function renderTermList(card, terms, mode) {
   if (!terms.length) return "";
+  const cardId = storageCardId(card);
   return `
     <div class="term-list">
       ${terms
         .map((term) => {
-          const termKey = makeKey(card.examId, card.id, term.id);
-          const saved = isSaved(card.examId, card.id, term.id);
+          const termKey = makeKey(card.examId, cardId, term.id);
+          const saved = isSaved(card.examId, cardId, term.id);
           const item = state.library[termKey];
           const removalLocked = saved && !canRemoveSavedItem(item);
           const revealTerm = state.revealedTermKeys.has(termKey);
@@ -1105,9 +1196,9 @@ function renderTermList(card, terms, mode) {
               : "加入复习库";
           const disabled = removalLocked ? " disabled" : "";
           return `
-            <div class="term-row" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">
+            <div class="term-row" data-exam-id="${card.examId}" data-card-id="${cardId}" data-term-id="${term.id}">
               <div class="term-actions">
-                <button class="term-toggle${savedClass}${lockedClass}" type="button" title="${title}" aria-label="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}"${disabled}>${symbol}</button>
+                <button class="term-toggle${savedClass}${lockedClass}" type="button" title="${title}" aria-label="${title}" data-action="toggle-term" data-exam-id="${card.examId}" data-card-id="${cardId}" data-term-id="${term.id}"${disabled}>${symbol}</button>
                 ${mode === "review" ? renderAdvanceButton(card, term) : ""}
               </div>
               <div class="term-body">
@@ -1125,7 +1216,8 @@ function renderTermList(card, terms, mode) {
 }
 
 function renderAdvanceButton(card, term) {
-  const item = state.library[makeKey(card.examId, card.id, term.id)];
+  const cardId = storageCardId(card);
+  const item = state.library[makeKey(card.examId, cardId, term.id)];
   const itemRound = reviewRoundOf(item);
   const activeRound = state.reviewRound;
 
@@ -1138,7 +1230,11 @@ function renderAdvanceButton(card, term) {
   }
 
   const nextRound = activeRound + 1;
-  return `<button class="round-advance" type="button" title="加入第 ${nextRound} 轮（电脑端可按 Q）" data-action="advance-round" data-exam-id="${card.examId}" data-card-id="${card.id}" data-term-id="${term.id}">→${nextRound}</button>`;
+  return `<button class="round-advance" type="button" title="加入第 ${nextRound} 轮（电脑端可按 Q）" data-action="advance-round" data-exam-id="${card.examId}" data-card-id="${cardId}" data-term-id="${term.id}">→${nextRound}</button>`;
+}
+
+function storageCardId(card) {
+  return card.storageCardId || card.id;
 }
 
 function renderInline(text, context, selectedTerms = null, forceReveal = false) {
