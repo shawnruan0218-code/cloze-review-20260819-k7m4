@@ -946,6 +946,14 @@ function openSourceDialogFromHover(row) {
   els.sourceTitle.textContent = term?.title || "词条原句";
   els.sourceSentence.innerHTML = renderInline(context.sentence, "sentence");
   els.sourceTranslation.textContent = context.translation;
+  els.sourceNote.classList.toggle("is-correct", context.answerStatus === "correct");
+  els.sourceNote.classList.toggle("is-wrong", context.answerStatus === "wrong");
+  els.sourceNote.textContent =
+    context.answerStatus === "correct"
+      ? "正确答案：该词已放回对应空位。"
+      : context.answerStatus === "wrong"
+        ? "错误选项：该词仅为回看而放回对应空位，并不是本题正确答案。"
+        : "该词已放回对应空位，便于查看它在句中的搭配。";
   els.sourceNote.hidden = !context.substituted;
   els.sourceDialog.showModal();
 }

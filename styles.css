@@ -865,13 +865,25 @@ button {
 
 .source-note {
   margin: 0;
-  border-left: 3px solid var(--warn-strong);
+  border-left: 3px solid #8b9198;
   padding: 8px 10px;
-  background: #fff8d8;
-  color: #5f4e12;
+  background: #f1f3f5;
+  color: #394047;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.5;
+}
+
+.source-note.is-correct {
+  border-left-color: #18826f;
+  background: #e8f6f2;
+  color: #0d6658;
+}
+
+.source-note.is-wrong {
+  border-left-color: #c94f45;
+  background: #fff0ee;
+  color: #9b342c;
 }
 
 .annotation-dialog::backdrop {
