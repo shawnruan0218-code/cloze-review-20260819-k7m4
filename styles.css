@@ -407,7 +407,7 @@ button {
   justify-content: flex-end;
 }
 
-.auth-form input {
+.auth-form input:not([type="file"]) {
   width: 150px;
   height: 36px;
   border: 1px solid var(--line);
@@ -439,17 +439,10 @@ button {
   opacity: 0.5;
 }
 
-.sync-card:not(.is-configured) .auth-form input,
 .sync-card:not(.is-configured) #signInButton,
-.sync-card:not(.is-configured) #signUpButton,
 .sync-card:not(.is-signed-in) #syncNowButton,
 .sync-card:not(.is-signed-in) #signOutButton,
-.sync-card.is-signed-in #signInButton,
-.sync-card.is-signed-in #signUpButton {
-  display: none;
-}
-
-.sync-card.is-signed-in .auth-form input {
+.sync-card.is-signed-in #signInButton {
   display: none;
 }
 

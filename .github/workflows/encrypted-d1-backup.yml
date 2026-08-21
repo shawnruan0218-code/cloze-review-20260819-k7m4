@@ -1,0 +1,62 @@
+name: Encrypted D1 Backup
+
+on:
+  schedule:
+    - cron: "23 18 * * *"
+    - cron: "31 18 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Export D1
+        run: npx wrangler d1 export cloze-review-20260819-k7m4 --remote --output=d1.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Validate and encrypt
+        env:
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          test -s d1.sql
+          grep -q 'cloze-review-20260819-k7m4_records' d1.sql
+          gzip -9 d1.sql
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -in d1.sql.gz -out "cloze-review-20260819-k7m4-${GITHUB_RUN_ID}.sql.gz.enc" -pass env:BACKUP_ENCRYPTION_KEY
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "cloze-review-20260819-k7m4-${GITHUB_RUN_ID}.sql.gz.enc" -out verify.sql.gz -pass env:BACKUP_ENCRYPTION_KEY
+          gzip -t verify.sql.gz
+          rm verify.sql.gz
+          shasum -a 256 *.enc > checksums.txt
+      - name: Upload 90-day encrypted artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloze-review-20260819-k7m4-${{ github.run_id }}
+          path: |
+            *.enc
+            checksums.txt
+          retention-days: 90
+          if-no-files-found: error
+      - name: Keep monthly encrypted snapshot
+        if: ${{ github.event.schedule == '31 18 1 * *' || github.event_name == 'workflow_dispatch' }}
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+          BACKUP_REPO: shawnruan0218-code/cloze-review-20260819-k7m4-backups
+        run: |
+          git clone "https://x-access-token:${BACKUP_REPO_TOKEN}@github.com/${BACKUP_REPO}.git" monthly
+          mkdir -p monthly/snapshots
+          cp *.enc checksums.txt monthly/snapshots/
+          cd monthly
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add snapshots
+          git commit -m "Monthly encrypted D1 snapshot ${GITHUB_RUN_ID}"
+          git push

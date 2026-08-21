@@ -1,0 +1,21 @@
+name = "cloze-review-20260819-k7m4"
+main = "worker/src/index.js"
+compatibility_date = "2026-08-01"
+
+[vars]
+APP_NAMESPACE = "cloze-review-20260819-k7m4"
+FRONTEND_URL = "https://shawnruan0218-code.github.io/cloze-review-20260819-k7m4/"
+ALLOWED_ORIGINS = "https://shawnruan0218-code.github.io,http://127.0.0.1:8765,http://localhost:8765"
+MIN_CLIENT_VERSION = "2"
+LEGACY_OWNER_LOGIN = "shawnruan0218-code"
+GITHUB_CLIENT_ID = "Ov23liUAoN9lEDu55Ua3"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cloze-review-20260819-k7m4"
+database_id = "eb940b9a-c530-4794-a13d-214bfca63920"
+migrations_dir = "migrations"
+
+[observability]
+enabled = true
+head_sampling_rate = 1

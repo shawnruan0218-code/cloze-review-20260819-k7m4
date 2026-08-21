@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>英语 Cloze 复习库</title>
-    <link rel="stylesheet" href="./styles.css?v=20260716-cloze-answer-status" />
+    <link rel="stylesheet" href="./styles.css?v=20260819-cloudflare-migration" />
   </head>
   <body>
     <div class="app-shell">
@@ -63,15 +63,15 @@
         <section class="sync-card" id="syncCard">
           <div class="sync-copy">
             <strong id="syncTitle">本地模式</strong>
-            <span id="syncDetail">配置 Supabase 后可跨设备同步复习库</span>
+            <span id="syncDetail">本地数据已保存，登录 GitHub 后可跨设备同步</span>
           </div>
           <form class="auth-form" id="authForm">
-            <input id="emailInput" type="email" autocomplete="email" placeholder="邮箱" />
-            <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" />
-            <button id="signInButton" type="submit">登录</button>
-            <button id="signUpButton" type="button">注册</button>
+            <button id="signInButton" type="submit">GitHub 登录</button>
             <button id="syncNowButton" type="button">同步</button>
+            <button id="exportButton" type="button">导出备份</button>
+            <button id="importButton" type="button">导入备份</button>
             <button id="signOutButton" type="button">退出</button>
+            <input id="importFile" type="file" accept="application/json,.json" hidden />
           </form>
         </section>
 
@@ -123,7 +123,8 @@
     <script src="./data.js?v=20260716-english1-2018-corrected"></script>
     <script src="./data-english2.js?v=20260716-english2-2022"></script>
     <script src="./data-cloze.js?v=20260716-cloze-answer-status"></script>
-    <script src="./sync-config.js"></script>
-    <script src="./app.js?v=20260716-cloze-e-toggle"></script>
+    <script src="./cloudflare-config.js?v=20260819-cloudflare-migration"></script>
+    <script src="./cloud-sync.js?v=20260819-cloudflare-migration"></script>
+    <script src="./app.js?v=20260819-cloudflare-migration"></script>
   </body>
 </html>

@@ -1,0 +1,10 @@
+node_modules/
+.dev.vars
+.wrangler/
+dist/
+backups/
+*.sqlite
+*.sqlite3
+*.sql.gz
+*.enc
+migration-private/

@@ -1,48 +1,40 @@
-# 英语一 Cloze 复习库
+# Cloze Review
 
-一个静态网页应用，可部署到 GitHub Pages。配置 Supabase 后，电脑和手机用同一账号登录即可同步复习库。
+英语一、英语二和完形填空的本地优先挖空复习应用。静态内容由 GitHub Pages 提供，登录和增量同步由独立的 Cloudflare Worker 与 D1 提供。
 
-## 手机/电脑交互
+## 数据安全
 
-- 电脑端：保留 Hover 显示答案、鼠标悬停词条后按 `q` 加入复习库。
-- 手机端：自动隐藏 Hover，禁用 `q` 快捷键，只保留点击操作。
-- 两端登录同一个 Supabase 账号后，复习库会自动同步。
+- 用户操作立即写入本机 IndexedDB，断网时仍可训练和修改复习库。
+- 原有 `cloze-review-library-v1`、批注和设置键会被读取兼容，但不会清空或改名。
+- 云同步只上传 dirty queue，并按服务端 change sequence 增量拉取。
+- 删除使用 tombstone 软删除；退出 GitHub 登录不会删除本机学习数据。
+- 页面保留带校验和的 JSON 导出和非破坏性合并导入。
+- 旧 Supabase 项目和原始导出不会由本项目删除。
 
-## 配置 Supabase
-
-1. 创建 Supabase 项目。
-2. 打开 Supabase SQL Editor，执行 `supabase-schema.sql`。
-3. 在 Supabase Project Settings 里复制：
-   - Project URL
-   - anon public key
-4. 编辑 `sync-config.js`：
-
-```js
-window.SYNC_CONFIG = {
-  supabaseUrl: "https://你的项目.supabase.co",
-  supabaseAnonKey: "你的 anon public key",
-};
-```
-
-不要把 service_role key 放进前端文件。
-
-## 部署到 GitHub Pages
-
-把这个文件夹作为 GitHub 仓库根目录推送到 GitHub：
+## 本地验证
 
 ```bash
-git init
-git add .
-git commit -m "deploy cloze review app"
-git branch -M main
-git remote add origin https://github.com/你的用户名/你的仓库.git
-git push -u origin main
+npm ci
+npm test
+npm run migration:verify
+npm run d1:migrate:local
+npm run dev:worker
 ```
 
-然后在 GitHub 仓库：
+静态页面可用任意静态服务器打开，例如：
 
-1. Settings -> Pages。
-2. Source 选择 GitHub Actions。
-3. 等待 `Deploy to GitHub Pages` 工作流完成。
+```bash
+python3 -m http.server 8765
+```
 
-部署完成后，GitHub Pages 给出的地址就是手机和电脑都能打开的网址。
+## 部署结构
+
+- 命名空间：`cloze-review-20260819-k7m4`
+- Worker 与 D1 配置：`wrangler.toml`
+- D1 migration：`migrations/`
+- Worker API：`worker/src/index.js`
+- 浏览器同步引擎：`cloud-sync.js`
+- Supabase 转换脚本：`scripts/build-d1-import.mjs`
+- 加密备份工作流：`.github/workflows/encrypted-d1-backup.yml`
+
+密钥只允许写入 Cloudflare Worker Secrets 或 GitHub Actions Secrets。完整部署和恢复步骤见 [迁移与恢复说明](docs/迁移与恢复说明.md)。

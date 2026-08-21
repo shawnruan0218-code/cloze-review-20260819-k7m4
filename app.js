@@ -1,18 +1,13 @@
 const STORAGE_KEY = "cloze-review-library-v1";
 const LAST_YEAR_KEY = "cloze-review-last-year";
 const HOVER_REVEAL_KEY = "cloze-review-hover-reveal";
-const AUTH_SESSION_KEY = "cloze-review-supabase-session";
 const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
 const FONT_SIZE_KEY = "cloze-review-font-size";
 const REVIEW_ROUND_KEY = "cloze-review-active-round";
 const ANNOTATION_STORAGE_KEY = "cloze-review-annotations-v1";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
 const FONT_SIZES = new Set(["small", "medium", "large"]);
-const CLOUD_PAGE_SIZE = 1000;
-const CLOUD_WRITE_BATCH_SIZE = 500;
 const MAX_REVIEW_ROUND = 4;
-const CLOUD_ROUND_MARKER = "::review-round-";
-const CLOUD_ANNOTATION_MARKER = "::cloze-annotation::";
 
 const els = {
   yearList: document.querySelector("#yearList"),
@@ -30,11 +25,11 @@ const els = {
   syncTitle: document.querySelector("#syncTitle"),
   syncDetail: document.querySelector("#syncDetail"),
   authForm: document.querySelector("#authForm"),
-  emailInput: document.querySelector("#emailInput"),
-  passwordInput: document.querySelector("#passwordInput"),
   signInButton: document.querySelector("#signInButton"),
-  signUpButton: document.querySelector("#signUpButton"),
   syncNowButton: document.querySelector("#syncNowButton"),
+  exportButton: document.querySelector("#exportButton"),
+  importButton: document.querySelector("#importButton"),
+  importFile: document.querySelector("#importFile"),
   signOutButton: document.querySelector("#signOutButton"),
   statsStrip: document.querySelector("#statsStrip"),
   content: document.querySelector("#content"),
@@ -54,7 +49,7 @@ const els = {
   annotationTooltip: document.querySelector("#annotationTooltip"),
 };
 
-const syncConfig = normalizeSyncConfig(window.SYNC_CONFIG || {});
+const cloudSync = window.ClozeCloudSync;
 const touchModeMedia = window.matchMedia(TOUCH_MODE_QUERY);
 
 const state = {
@@ -76,11 +71,10 @@ const state = {
   hoveredAnnotationId: "",
   pendingAnnotation: null,
   revealedTermKeys: new Set(),
-  authSession: loadAuthSession(),
-  syncConfigured: Boolean(syncConfig.supabaseUrl && syncConfig.supabaseAnonKey),
+  authSession: null,
+  syncConfigured: Boolean(cloudSync?.configured),
   syncBusy: false,
   syncMessage: "",
-  syncTimer: null,
   toastTimer: null,
 };
 
@@ -149,8 +143,10 @@ function bindEvents() {
     signIn();
   });
 
-  els.signUpButton.addEventListener("click", () => signUp());
-  els.syncNowButton.addEventListener("click", () => syncFromCloud({ mergeLocal: true }));
+  els.syncNowButton.addEventListener("click", () => syncFromCloud({ reason: "manual" }));
+  els.exportButton.addEventListener("click", () => exportLocalBackup());
+  els.importButton.addEventListener("click", () => els.importFile.click());
+  els.importFile.addEventListener("change", () => importLocalBackup());
   els.signOutButton.addEventListener("click", () => signOut());
   els.sourceClose.addEventListener("click", () => closeSourceDialog());
   els.sourceDialog.addEventListener("cancel", (event) => {
@@ -174,14 +170,6 @@ function bindEvents() {
     state.touchMode = event.matches;
     if (state.touchMode) clearHoveredTermRow();
     renderChrome();
-  });
-
-  window.addEventListener("focus", () => {
-    if (state.authSession) syncFromCloud({ silent: true });
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && state.authSession) syncFromCloud({ silent: true });
   });
 
   document.addEventListener("keydown", (event) => {
@@ -692,33 +680,30 @@ function renderReviewRounds() {
 }
 
 function renderSyncPanel() {
-  const signedIn = Boolean(state.authSession?.access_token);
-  const email = state.authSession?.user?.email || "";
+  const signedIn = Boolean(state.authSession?.token);
+  const login = state.authSession?.user?.login || "";
 
   els.syncCard.classList.toggle("is-configured", state.syncConfigured);
   els.syncCard.classList.toggle("is-signed-in", signedIn);
   els.syncCard.classList.toggle("is-busy", state.syncBusy);
-  els.emailInput.disabled = !state.syncConfigured || signedIn || state.syncBusy;
-  els.passwordInput.disabled = !state.syncConfigured || signedIn || state.syncBusy;
   els.signInButton.disabled = !state.syncConfigured || signedIn || state.syncBusy;
-  els.signUpButton.disabled = !state.syncConfigured || signedIn || state.syncBusy;
   els.syncNowButton.disabled = !state.syncConfigured || !signedIn || state.syncBusy;
   els.signOutButton.disabled = !signedIn || state.syncBusy;
 
   if (!state.syncConfigured) {
     els.syncTitle.textContent = "本地模式";
-    els.syncDetail.textContent = "填好 sync-config.js 后可跨设备同步";
+    els.syncDetail.textContent = "云端尚未部署；全部功能仍会保存在本机";
     return;
   }
 
   if (!signedIn) {
     els.syncTitle.textContent = "云同步未登录";
-    els.syncDetail.textContent = state.syncMessage || "登录同一个账号即可同步手机和电脑";
+    els.syncDetail.textContent = state.syncMessage || "使用同一个 GitHub 账号同步手机和电脑";
     return;
   }
 
   els.syncTitle.textContent = state.syncBusy ? "正在同步" : "云同步已登录";
-  els.syncDetail.textContent = state.syncMessage || email;
+  els.syncDetail.textContent = state.syncMessage || `GitHub @${login}`;
 }
 
 function renderStats() {
@@ -1839,460 +1824,106 @@ function advanceTermToNextRound(examId, cardId, termId) {
 
 async function bootstrapSync() {
   renderSyncPanel();
-  if (!state.syncConfigured || !state.authSession) return;
-
   try {
-    await refreshSessionIfNeeded();
-    await syncFromCloud({ mergeLocal: true, silent: true });
-    startAutoSync();
-  } catch (error) {
-    state.syncMessage = readableError(error);
-    saveAuthSession(null);
-    state.authSession = null;
+    state.authSession = await cloudSync.init({
+      getLibrary: () => state.library,
+      getAnnotations: () => state.annotations,
+      applyRemote: applyCloudRecords,
+      onStatus: handleCloudStatus,
+    });
     renderSyncPanel();
-  }
-}
-
-async function signUp() {
-  if (!state.syncConfigured || state.syncBusy) return;
-  const credentials = readCredentials();
-  if (!credentials) return;
-
-  setSyncBusy(true, "正在注册");
-  try {
-    const redirectTo = window.location.href.split("#")[0];
-    const session = await supabaseAuth(`/signup?redirect_to=${encodeURIComponent(redirectTo)}`, credentials);
-    if (session?.access_token) {
-      setAuthSession(session);
-      await syncFromCloud({ mergeLocal: true, silent: true });
-      startAutoSync();
-      showToast("注册并登录成功");
-    } else {
-      state.syncMessage = "注册成功，请按邮箱提示验证后登录";
-      showToast("请验证邮箱后登录");
-    }
   } catch (error) {
-    showToast(readableError(error));
-    state.syncMessage = readableError(error);
-  } finally {
-    setSyncBusy(false);
+    state.syncMessage = `本地可继续使用：${readableError(error)}`;
     renderSyncPanel();
   }
 }
 
 async function signIn() {
   if (!state.syncConfigured || state.syncBusy) return;
-  const credentials = readCredentials();
-  if (!credentials) return;
-
-  setSyncBusy(true, "正在登录");
-  try {
-    const session = await supabaseAuth("/token?grant_type=password", credentials);
-    setAuthSession(session);
-    await syncFromCloud({ mergeLocal: true, silent: true });
-    startAutoSync();
-    showToast("已登录并同步");
-  } catch (error) {
-    showToast(readableError(error));
-    state.syncMessage = readableError(error);
-  } finally {
-    setSyncBusy(false);
-    renderSyncPanel();
-  }
+  cloudSync.login();
 }
 
-function signOut() {
-  stopAutoSync();
-  setAuthSession(null);
+async function signOut() {
+  await cloudSync.logout();
+  state.authSession = null;
   state.syncMessage = "已退出，当前设备仍保留本地复习库";
   renderSyncPanel();
   showToast("已退出同步账号");
 }
 
-async function syncFromCloud({ mergeLocal = false, silent = false } = {}) {
+async function syncFromCloud({ reason = "manual" } = {}) {
   if (!state.syncConfigured || !state.authSession || state.syncBusy) return;
-
-  setSyncBusy(true, silent ? "" : "正在同步");
-  try {
-    await refreshSessionIfNeeded();
-    const { library: remoteLibrary, annotations: remoteAnnotations } = await fetchCloudState();
-    const nextLibrary = mergeLocal
-      ? mergeReviewLibraries(remoteLibrary, state.library)
-      : remoteLibrary;
-    const nextAnnotations = mergeAnnotations(remoteAnnotations, state.annotations);
-
-    if (mergeLocal) {
-      const missingItems = Object.entries(nextLibrary)
-        .filter(([key, item]) =>
-          !remoteLibrary[key] || reviewRoundOf(item) > reviewRoundOf(remoteLibrary[key])
-        )
-        .flatMap(([key, item]) => cloudItemsFromLocal(key, item));
-      if (missingItems.length) await upsertCloudItems(missingItems);
-    }
-
-    const pendingAnnotations = Object.values(nextAnnotations)
-      .filter((annotation) => annotationIsNewer(annotation, remoteAnnotations[annotation.id]))
-      .map((annotation) => cloudAnnotationFromLocal(annotation));
-    if (pendingAnnotations.length) await upsertCloudItems(pendingAnnotations);
-
-    state.library = nextLibrary;
-    state.annotations = nextAnnotations;
-    saveLibrary();
-    saveAnnotations();
-    renderYearList();
-    renderStats();
-    renderContent();
-    state.syncMessage = `已同步 ${Object.keys(state.library).length} 个词条`;
-    if (!silent) showToast("同步完成");
-  } catch (error) {
-    state.syncMessage = readableError(error);
-    if (!silent) showToast(readableError(error));
-  } finally {
-    setSyncBusy(false);
-    renderSyncPanel();
-  }
+  await cloudSync.syncNow(reason);
 }
 
 async function syncItemMutation(action, item, key, round = 1) {
-  if (!state.syncConfigured || !state.authSession) return;
-
-  try {
-    await refreshSessionIfNeeded();
-    if (action === "delete") {
-      await deleteCloudItem(key);
-      state.syncMessage = "已同步删除";
-    } else if (action === "promote") {
-      await upsertCloudItems([cloudItemFromLocal(key, item, round)]);
-      state.syncMessage = `已同步到第 ${round} 轮`;
-    } else {
-      await upsertCloudItems([cloudItemFromLocal(key, item)]);
-      state.syncMessage = "已同步加入";
-    }
-    renderSyncPanel();
-  } catch (error) {
-    state.syncMessage = `本地已保存，云同步失败：${readableError(error)}`;
-    renderSyncPanel();
-  }
+  cloudSync.enqueueReview(action, { ...item, reviewRound: round > 1 ? round : reviewRoundOf(item) }, key);
+  state.syncMessage = "本地已保存，等待合并同步";
+  renderSyncPanel();
 }
 
 async function syncAnnotationMutation(annotation) {
-  if (!state.syncConfigured || !state.authSession) return;
-
-  try {
-    await refreshSessionIfNeeded();
-    await upsertCloudItems([cloudAnnotationFromLocal(annotation)]);
-    state.syncMessage = "注释已同步";
-    renderSyncPanel();
-  } catch (error) {
-    state.syncMessage = `注释已保存在本机，云同步失败：${readableError(error)}`;
-    renderSyncPanel();
-  }
+  cloudSync.enqueueAnnotation(annotation);
+  state.syncMessage = "注释已保存在本机，等待合并同步";
+  renderSyncPanel();
 }
 
-async function fetchCloudState() {
-  const rows = [];
+function handleCloudStatus({ kind, message, session }) {
+  state.authSession = session || null;
+  state.syncBusy = kind === "syncing";
+  state.syncMessage = message;
+  renderSyncPanel();
+}
 
-  for (let offset = 0; ; offset += CLOUD_PAGE_SIZE) {
-    const page = await supabaseRest(
-      `/review_items?select=item_key,exam_id,card_id,term_id,added_at&order=added_at.asc&limit=${CLOUD_PAGE_SIZE}&offset=${offset}`
-    );
-
-    rows.push(...page);
-    if (page.length < CLOUD_PAGE_SIZE) break;
-  }
-
-  return rows.reduce((cloudState, row) => {
-    if (isCloudAnnotationKey(row.item_key)) {
-      const annotation = parseCloudAnnotation(row);
-      if (annotation) cloudState.annotations[annotation.id] = annotation;
-      return cloudState;
+function applyCloudRecords(records) {
+  records.forEach((record) => {
+    if (record.entityType === "review_item") {
+      if (record.deletedAt) delete state.library[record.itemKey];
+      else state.library[record.itemKey] = { ...state.library[record.itemKey], ...record.payload };
     }
-
-    const { baseKey, round } = parseCloudItemKey(row.item_key);
-    const existing = cloudState.library[baseKey];
-    cloudState.library[baseKey] = {
-      ...existing,
-      examId: row.exam_id,
-      cardId: row.card_id,
-      termId: row.term_id,
-      addedAt: existing?.addedAt || row.added_at,
-      reviewRound: Math.max(reviewRoundOf(existing), round),
-    };
-    return cloudState;
-  }, { library: {}, annotations: {} });
-}
-
-async function upsertCloudItems(items) {
-  if (!items.length) return;
-  for (let index = 0; index < items.length; index += CLOUD_WRITE_BATCH_SIZE) {
-    await supabaseRest("/review_items?on_conflict=id", {
-      method: "POST",
-      headers: {
-        "Prefer": "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify(items.slice(index, index + CLOUD_WRITE_BATCH_SIZE)),
-    });
-  }
-}
-
-async function deleteCloudItem(key) {
-  const cloudKeys = [
-    key,
-    ...Array.from(
-      { length: MAX_REVIEW_ROUND - 1 },
-      (_unused, index) => cloudRoundKey(key, index + 2)
-    ),
-  ];
-
-  await Promise.all(
-    cloudKeys.map((cloudKey) =>
-      supabaseRest(`/review_items?id=eq.${encodeURIComponent(cloudIdForKey(cloudKey))}`, {
-        method: "DELETE",
-        headers: {
-          "Prefer": "return=minimal",
-        },
-      })
-    )
-  );
-}
-
-function cloudItemsFromLocal(key, item) {
-  const reviewRound = reviewRoundOf(item);
-  return Array.from({ length: reviewRound }, (_unused, index) =>
-    cloudItemFromLocal(key, item, index + 1)
-  );
-}
-
-function cloudItemFromLocal(key, item, round = 1) {
-  const userId = state.authSession?.user?.id;
-  const cloudKey = round > 1 ? cloudRoundKey(key, round) : key;
-  return {
-    id: cloudIdForKey(cloudKey),
-    user_id: userId,
-    item_key: cloudKey,
-    exam_id: item.examId,
-    card_id: item.cardId,
-    term_id: item.termId,
-    added_at: item.addedAt || new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-}
-
-function cloudAnnotationFromLocal(annotation) {
-  const cloudKey = `${CLOUD_ANNOTATION_MARKER}${annotation.id}`;
-  return {
-    id: cloudIdForKey(cloudKey),
-    user_id: state.authSession?.user?.id,
-    item_key: cloudKey,
-    exam_id: annotation.examId,
-    card_id: annotation.cardId,
-    term_id: JSON.stringify({
-      id: annotation.id,
-      start: annotation.start,
-      end: annotation.end,
-      selectedText: annotation.selectedText,
-      note: annotation.note,
-      createdAt: annotation.createdAt,
-      updatedAt: annotation.updatedAt,
-      deletedAt: annotation.deletedAt || null,
-    }),
-    added_at: annotation.createdAt || new Date().toISOString(),
-    updated_at: annotation.updatedAt || new Date().toISOString(),
-  };
-}
-
-function isCloudAnnotationKey(key) {
-  return String(key).startsWith(CLOUD_ANNOTATION_MARKER);
-}
-
-function parseCloudAnnotation(row) {
-  try {
-    const data = JSON.parse(row.term_id || "{}");
-    const id = String(data.id || row.item_key.slice(CLOUD_ANNOTATION_MARKER.length));
-    if (!id || !data.selectedText) return null;
-    return {
-      id,
-      examId: row.exam_id,
-      cardId: row.card_id,
-      start: Number(data.start),
-      end: Number(data.end),
-      selectedText: String(data.selectedText),
-      note: String(data.note || ""),
-      createdAt: data.createdAt || row.added_at,
-      updatedAt: data.updatedAt || data.createdAt || row.added_at,
-      deletedAt: data.deletedAt || null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function mergeAnnotations(remoteAnnotations, localAnnotations) {
-  const merged = { ...remoteAnnotations };
-  Object.entries(localAnnotations).forEach(([id, localAnnotation]) => {
-    const remoteAnnotation = merged[id];
-    if (annotationIsNewer(localAnnotation, remoteAnnotation)) {
-      merged[id] = localAnnotation;
+    if (record.entityType === "annotation") {
+      if (record.deletedAt) delete state.annotations[record.itemKey];
+      else state.annotations[record.itemKey] = { ...state.annotations[record.itemKey], ...record.payload };
     }
   });
-  return merged;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.library));
+  localStorage.setItem(ANNOTATION_STORAGE_KEY, JSON.stringify(state.annotations));
+  renderYearList();
+  renderStats();
+  renderContent();
 }
 
-function annotationIsNewer(candidate, existing) {
-  if (!existing) return true;
-  return annotationTimestamp(candidate) > annotationTimestamp(existing);
+async function exportLocalBackup() {
+  try {
+    const backup = await cloudSync.exportBackup();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const anchor = document.createElement("a");
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = `cloze-review-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
+    showToast("备份已导出");
+  } catch (error) {
+    showToast(readableError(error));
+  }
 }
 
-function annotationTimestamp(annotation) {
-  return Date.parse(annotation?.updatedAt || annotation?.createdAt || 0) || 0;
-}
-
-function cloudIdForKey(key) {
-  return `${state.authSession.user.id}::${key}`;
-}
-
-function cloudRoundKey(key, round) {
-  return `${key}${CLOUD_ROUND_MARKER}${round}`;
+async function importLocalBackup() {
+  const file = els.importFile.files?.[0];
+  els.importFile.value = "";
+  if (!file) return;
+  try {
+    await cloudSync.importBackup(JSON.parse(await file.text()));
+    showToast("备份已合并，不会覆盖较新的内容");
+  } catch (error) {
+    showToast(readableError(error));
+  }
 }
 
 function parseCloudItemKey(key) {
   const match = String(key).match(/^(.*)::review-round-([2-4])$/);
   if (!match) return { baseKey: key, round: 1 };
   return { baseKey: match[1], round: Number(match[2]) };
-}
-
-function mergeReviewLibraries(remoteLibrary, localLibrary) {
-  const merged = { ...remoteLibrary };
-
-  Object.entries(localLibrary).forEach(([key, localItem]) => {
-    const remoteItem = merged[key];
-    merged[key] = {
-      ...(remoteItem || {}),
-      ...localItem,
-      reviewRound: Math.max(reviewRoundOf(remoteItem), reviewRoundOf(localItem)),
-    };
-  });
-
-  return merged;
-}
-
-async function supabaseAuth(path, body) {
-  const response = await fetch(`${syncConfig.supabaseUrl}/auth/v1${path}`, {
-    method: "POST",
-    headers: {
-      "apikey": syncConfig.supabaseAnonKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  return readSupabaseResponse(response);
-}
-
-async function supabaseRest(path, options = {}) {
-  const headers = {
-    "apikey": syncConfig.supabaseAnonKey,
-    "Authorization": `Bearer ${state.authSession.access_token}`,
-    "Content-Type": "application/json",
-    ...(options.headers || {}),
-  };
-
-  const response = await fetch(`${syncConfig.supabaseUrl}/rest/v1${path}`, {
-    ...options,
-    headers,
-  });
-
-  return readSupabaseResponse(response);
-}
-
-async function readSupabaseResponse(response) {
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    throw new Error(data?.msg || data?.message || response.statusText || "同步失败");
-  }
-  return data;
-}
-
-async function refreshSessionIfNeeded() {
-  if (!state.authSession?.refresh_token) return;
-  const expiresAt = state.authSession.expires_at || 0;
-  if (Date.now() < expiresAt - 60_000) return;
-
-  const session = await supabaseAuth("/token?grant_type=refresh_token", {
-    refresh_token: state.authSession.refresh_token,
-  });
-  setAuthSession(session);
-}
-
-function setAuthSession(session) {
-  state.authSession = session ? normalizeSession(session) : null;
-  saveAuthSession(state.authSession);
-  if (state.authSession?.user?.email) els.emailInput.value = state.authSession.user.email;
-  if (!state.authSession) els.passwordInput.value = "";
-}
-
-function normalizeSession(session) {
-  return {
-    ...session,
-    expires_at: session.expires_at
-      ? session.expires_at * 1000
-      : Date.now() + (session.expires_in || 3600) * 1000,
-  };
-}
-
-function loadAuthSession() {
-  try {
-    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || "null");
-    if (!session?.access_token) return null;
-    return session;
-  } catch {
-    return null;
-  }
-}
-
-function saveAuthSession(session) {
-  if (session) {
-    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-  } else {
-    localStorage.removeItem(AUTH_SESSION_KEY);
-  }
-}
-
-function startAutoSync() {
-  stopAutoSync();
-  state.syncTimer = setInterval(() => syncFromCloud({ silent: true }), 30_000);
-}
-
-function stopAutoSync() {
-  if (!state.syncTimer) return;
-  clearInterval(state.syncTimer);
-  state.syncTimer = null;
-}
-
-function setSyncBusy(isBusy, message = "") {
-  state.syncBusy = isBusy;
-  if (message) state.syncMessage = message;
-  renderSyncPanel();
-}
-
-function readCredentials() {
-  const email = els.emailInput.value.trim();
-  const password = els.passwordInput.value;
-
-  if (!email || !password) {
-    showToast("请填写邮箱和密码");
-    return null;
-  }
-
-  return { email, password };
-}
-
-function normalizeSyncConfig(config) {
-  return {
-    supabaseUrl: String(config.supabaseUrl || "").replace(/\/$/, ""),
-    supabaseAnonKey: String(config.supabaseAnonKey || ""),
-  };
 }
 
 function loadFontSize() {
