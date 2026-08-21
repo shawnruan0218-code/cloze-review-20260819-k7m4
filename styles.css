@@ -79,10 +79,53 @@ button {
 
 .brand {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   margin-bottom: 24px;
+}
+
+.sidebar-toggle {
+  display: none;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+}
+
+.sidebar-toggle span,
+.sidebar-toggle span::before,
+.sidebar-toggle span::after {
+  display: block;
+  width: 20px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  content: "";
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.sidebar-toggle span::before {
+  transform: translateY(-6px);
+}
+
+.sidebar-toggle span::after {
+  transform: translateY(4px);
+}
+
+.mobile-nav-open .sidebar-toggle span {
+  background: transparent;
+}
+
+.mobile-nav-open .sidebar-toggle span::before {
+  transform: translateY(0) rotate(45deg);
+}
+
+.mobile-nav-open .sidebar-toggle span::after {
+  transform: translateY(-2px) rotate(-45deg);
 }
 
 .brand-mark {
@@ -1018,13 +1061,33 @@ code {
   }
 
   .sidebar {
-    position: static;
+    position: sticky;
+    z-index: 20;
+    top: 0;
     height: auto;
     padding: 14px 12px;
+    overflow: visible;
+    box-shadow: 0 5px 18px rgba(21, 29, 37, 0.18);
   }
 
   .brand {
-    margin-bottom: 12px;
+    margin-bottom: 0;
+  }
+
+  .sidebar-toggle {
+    display: grid;
+  }
+
+  .year-list {
+    display: none;
+    max-height: calc(100dvh - 84px);
+    margin-top: 12px;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .mobile-nav-open .year-list {
+    display: grid;
   }
 
   .exam-group-items {

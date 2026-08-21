@@ -6,11 +6,13 @@ const FONT_SIZE_KEY = "cloze-review-font-size";
 const REVIEW_ROUND_KEY = "cloze-review-active-round";
 const ANNOTATION_STORAGE_KEY = "cloze-review-annotations-v1";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
+const MOBILE_NAV_QUERY = "(max-width: 860px)";
 const FONT_SIZES = new Set(["small", "medium", "large"]);
 const MAX_REVIEW_ROUND = 4;
 
 const els = {
   yearList: document.querySelector("#yearList"),
+  sidebarToggle: document.querySelector("#sidebarToggle"),
   yearTitle: document.querySelector("#yearTitle"),
   modeLabel: document.querySelector("#modeLabel"),
   studyMode: document.querySelector("#studyMode"),
@@ -51,6 +53,7 @@ const els = {
 
 const cloudSync = window.ClozeCloudSync;
 const touchModeMedia = window.matchMedia(TOUCH_MODE_QUERY);
+const mobileNavMedia = window.matchMedia(MOBILE_NAV_QUERY);
 
 const state = {
   exams: [],
@@ -62,6 +65,7 @@ const state = {
   hoverReveal: localStorage.getItem(HOVER_REVEAL_KEY) !== "off",
   fontSize: loadFontSize(),
   touchMode: touchModeMedia.matches,
+  mobileNavOpen: false,
   query: "",
   library: loadLibrary(),
   annotations: loadAnnotations(),
@@ -101,6 +105,10 @@ function init() {
 }
 
 function bindEvents() {
+  els.sidebarToggle.addEventListener("click", () => {
+    setMobileNavOpen(!state.mobileNavOpen);
+  });
+
   els.studyMode.addEventListener("click", () => {
     state.mode = "study";
     render();
@@ -172,6 +180,10 @@ function bindEvents() {
     renderChrome();
   });
 
+  mobileNavMedia.addEventListener("change", (event) => {
+    if (!event.matches) setMobileNavOpen(false);
+  });
+
   document.addEventListener("keydown", (event) => {
     if (state.touchMode) return;
     const key = event.key.toLowerCase();
@@ -217,6 +229,7 @@ function bindEvents() {
     if (!button) return;
     state.activeExamId = button.dataset.examId;
     localStorage.setItem(LAST_YEAR_KEY, state.activeExamId);
+    if (mobileNavMedia.matches) setMobileNavOpen(false);
     render();
   });
 
@@ -310,6 +323,15 @@ function bindEvents() {
     const annotation = event.target.closest(".cloze-annotation[data-annotation-id]");
     if (annotation && !annotation.contains(event.relatedTarget)) clearHoveredAnnotation(annotation);
   });
+}
+
+function setMobileNavOpen(open) {
+  state.mobileNavOpen = Boolean(open && mobileNavMedia.matches);
+  document.body.classList.toggle("mobile-nav-open", state.mobileNavOpen);
+  els.sidebarToggle.setAttribute("aria-expanded", String(state.mobileNavOpen));
+  const label = state.mobileNavOpen ? "收起目录" : "展开目录";
+  els.sidebarToggle.setAttribute("aria-label", label);
+  els.sidebarToggle.title = label;
 }
 
 function parseExam(file) {
