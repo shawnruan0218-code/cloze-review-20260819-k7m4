@@ -36,3 +36,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Verify deployed sync service
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 \
+            https://cloze-review-20260819-k7m4.shawnruan0218.workers.dev/api/health > health.json
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const health = JSON.parse(fs.readFileSync("health.json", "utf8")); assert.equal(health.ok, true); assert.equal(health.namespace, "cloze-review-20260819-k7m4"); assert.equal(health.protocolVersion, 2); console.log("Deployed sync service is healthy");'
