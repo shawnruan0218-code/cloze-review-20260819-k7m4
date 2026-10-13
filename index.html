@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>英语 Cloze 复习库</title>
-    <link rel="stylesheet" href="./styles.css?v=20260821-mobile-nav" />
+    <link rel="stylesheet" href="./styles.css?v=20261013-review-chapters" />
   </head>
   <body>
     <div class="app-shell">
@@ -56,7 +56,14 @@
           </div>
         </header>
 
-        <nav class="review-rounds" id="reviewRounds" aria-label="复习轮次" hidden>
+        <nav class="review-chapters" id="reviewChapters" role="tablist" aria-label="复习篇章">
+          <button class="review-chapter" type="button" role="tab" data-review-chapter="1">篇章 1</button>
+          <button class="review-chapter is-active" type="button" role="tab" data-review-chapter="2">篇章 2</button>
+          <button class="review-chapter" type="button" role="tab" data-review-chapter="3">篇章 3</button>
+          <button class="review-chapter" type="button" role="tab" data-review-chapter="4">篇章 4</button>
+        </nav>
+
+        <nav class="review-rounds" id="reviewRounds" aria-label="篇章内复习轮次" hidden>
           <button class="review-round is-active" type="button" data-review-round="1">1 轮</button>
           <button class="review-round" type="button" data-review-round="2">2 轮</button>
           <button class="review-round" type="button" data-review-round="3">3 轮</button>
@@ -127,7 +134,7 @@
     <script src="./data-english2.js?v=20260716-english2-2022"></script>
     <script src="./data-cloze.js?v=20260716-cloze-answer-status"></script>
     <script src="./cloudflare-config.js?v=20260819-cloudflare-migration"></script>
-    <script src="./cloud-sync.js?v=20260819-cloudflare-migration"></script>
-    <script src="./app.js?v=20260821-mobile-nav"></script>
+    <script src="./cloud-sync.js?v=20261013-review-chapters"></script>
+    <script src="./app.js?v=20261013-review-chapters"></script>
   </body>
 </html>

@@ -13,6 +13,7 @@
     "d1:migrate:remote": "wrangler d1 migrations apply cloze-review-20260819-k7m4 --remote"
   },
   "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
     "wrangler": "^4.30.0"
   }
 }

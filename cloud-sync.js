@@ -17,6 +17,7 @@
   let backoffUntil = 0;
   let failures = 0;
   let idleTimer = null;
+  let pendingWrite = Promise.resolve();
   const clientId = getClientId();
   const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel(`${namespace}-sync`) : null;
 
@@ -38,6 +39,9 @@
     hooks = nextHooks;
     await openDb();
     await migrateLegacyOnce();
+    const db = await openDb();
+    const cached = await requestToPromise(db.transaction("records").objectStore("records").getAll());
+    if (cached.length) hooks.applyRemote(cached);
     session = await metaGet("session");
     await finishOAuthIfPresent();
     bindLifecycle();
@@ -124,20 +128,30 @@
     const payload = { ...item, updatedAt: action === "delete" ? (item.updatedAt || now) : (item.updatedAt || now) };
     const record = makeRecord("review_item", itemKey, payload, payload.updatedAt, deletedAt,
       item.addedAt || now, "client");
-    putLocalRecords([record], true).then(() => requestSync("local-change"));
+    return queueLocalRecord(record);
   }
 
   function enqueueAnnotation(annotation) {
     const now = new Date().toISOString();
     const record = makeRecord("annotation", annotation.id, { ...annotation },
       annotation.updatedAt || now, annotation.deletedAt || null, annotation.createdAt || now, "client");
-    putLocalRecords([record], true).then(() => requestSync("local-change"));
+    return queueLocalRecord(record);
+  }
+
+  function queueLocalRecord(record) {
+    pendingWrite = pendingWrite.catch(() => {}).then(() => putLocalRecords([record], true));
+    pendingWrite.then(
+      () => requestSync("local-change"),
+      () => notify("offline", "本机保存失败，请导出备份后检查存储空间")
+    );
+    return pendingWrite;
   }
 
   function requestSync(reason, immediate = false) {
     if (!session || !window.ClozeCloudSync.configured || !navigator.onLine || document.hidden) return;
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => runAsLeader(reason), immediate ? 0 : 2000);
+    if (immediate) return runAsLeader(reason);
+    debounceTimer = setTimeout(() => runAsLeader(reason), 2000);
   }
 
   async function runAsLeader(reason) {
@@ -170,6 +184,7 @@
     let pulled = 0;
     let pages = 0;
     try {
+      await pendingWrite;
       while (true) {
         const dirty = await dirtyList(PUSH_BATCH);
         if (!dirty.length) break;
@@ -196,7 +211,7 @@
       failures = 0;
       backoffUntil = 0;
       await logSync({ reason, pushed, pulled, pages: pages + 1, cursor, error: null });
-      notify("ready", `已同步 ${Object.keys(hooks.getLibrary()).length} 个词条`);
+      notify("ready", `所有篇章已同步，共 ${Object.keys(hooks.getLibrary()).length} 个词条`);
       channel?.postMessage({ type: "synced", clientId, cursor, at: Date.now() });
     } catch (error) {
       failures += 1;
@@ -290,12 +305,20 @@
   }
 
   async function exportBackup() {
+    await pendingWrite;
     const db = await openDb();
     const records = await requestToPromise(db.transaction("records").objectStore("records").getAll());
     const envelope = {
-      format: "cloze-review-backup", version: 2, namespace,
+      format: "cloze-review-backup", version: 3, namespace,
       exportedAt: new Date().toISOString(), records,
       counts: records.reduce((counts, row) => ({ ...counts, [row.entityType]: (counts[row.entityType] || 0) + 1 }), {}),
+      chapters: records.reduce((counts, row) => {
+        if (row.entityType !== "review_item" || row.deletedAt) return counts;
+        const match = row.itemKey.match(/::review-chapter-([2-4])$/);
+        const chapter = match ? Number(match[1]) : Number(row.payload.reviewChapter || 1);
+        counts[chapter] = (counts[chapter] || 0) + 1;
+        return counts;
+      }, { 1: 0, 2: 0, 3: 0, 4: 0 }),
     };
     envelope.checksum = await checksum(stableJson(envelope));
     return envelope;
@@ -307,8 +330,25 @@
     }
     const { checksum: expected, ...unsigned } = envelope;
     if (expected !== await checksum(stableJson(unsigned))) throw new Error("备份校验失败");
-    await putLocalRecords(envelope.records.map((row) => ({ ...row, id: recordId(row.entityType, row.itemKey) })), true);
-    hooks.applyRemote(envelope.records);
+    if (![2, 3].includes(envelope.version)) throw new Error("请更新软件以导入此版本的备份");
+    const staged = new Map();
+    for (const row of envelope.records) {
+      if (!row || !["review_item", "annotation", "setting"].includes(row.entityType) ||
+          typeof row.itemKey !== "string" || !row.itemKey || !row.payload ||
+          typeof row.payload !== "object" || Array.isArray(row.payload) ||
+          !validTime(row.updatedAt) || (row.deletedAt && !validTime(row.deletedAt))) {
+        throw new Error("备份包含无效记录");
+      }
+      const normalized = { ...row, id: recordId(row.entityType, row.itemKey) };
+      staged.set(normalized.id, chooseWinner(staged.get(normalized.id), normalized));
+    }
+    await pendingWrite;
+    const db = await openDb();
+    const current = new Map((await requestToPromise(db.transaction("records").objectStore("records").getAll()))
+      .map((row) => [row.id, row]));
+    const applied = [...staged.values()].filter((row) => chooseWinner(current.get(row.id), row) === row);
+    await putLocalRecords(applied, true);
+    hooks.applyRemote(applied);
     requestSync("backup-import");
   }
 

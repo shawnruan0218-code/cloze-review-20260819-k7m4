@@ -4,11 +4,13 @@ const HOVER_REVEAL_KEY = "cloze-review-hover-reveal";
 const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
 const FONT_SIZE_KEY = "cloze-review-font-size";
 const REVIEW_ROUND_KEY = "cloze-review-active-round";
+const REVIEW_CHAPTER_KEY = "cloze-review-active-chapter";
 const ANNOTATION_STORAGE_KEY = "cloze-review-annotations-v1";
 const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
 const MOBILE_NAV_QUERY = "(max-width: 860px)";
 const FONT_SIZES = new Set(["small", "medium", "large"]);
 const MAX_REVIEW_ROUND = 4;
+const MAX_REVIEW_CHAPTER = 4;
 
 const els = {
   yearList: document.querySelector("#yearList"),
@@ -17,6 +19,7 @@ const els = {
   modeLabel: document.querySelector("#modeLabel"),
   studyMode: document.querySelector("#studyMode"),
   reviewMode: document.querySelector("#reviewMode"),
+  reviewChapterButtons: [...document.querySelectorAll("[data-review-chapter]")],
   reviewRounds: document.querySelector("#reviewRounds"),
   reviewRoundButtons: [...document.querySelectorAll("[data-review-round]")],
   toggleAnswers: document.querySelector("#toggleAnswers"),
@@ -60,6 +63,7 @@ const state = {
   examById: new Map(),
   activeExamId: "",
   mode: "study",
+  reviewChapter: loadReviewChapter(),
   reviewRound: loadReviewRound(),
   showAnswers: false,
   hoverReveal: localStorage.getItem(HOVER_REVEAL_KEY) !== "off",
@@ -119,10 +123,16 @@ function bindEvents() {
     render();
   });
 
+  els.reviewChapterButtons.forEach((button) => {
+    button.addEventListener("click", () => switchReviewChapter(button.dataset.reviewChapter));
+  });
+
   els.reviewRoundButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.reviewRound = normalizeReviewRound(button.dataset.reviewRound);
-      localStorage.setItem(REVIEW_ROUND_KEY, String(state.reviewRound));
+      localStorage.setItem(reviewRoundStorageKey(state.reviewChapter), String(state.reviewRound));
+      state.showAnswers = false;
+      state.revealedTermKeys.clear();
       render();
     });
   });
@@ -234,6 +244,11 @@ function bindEvents() {
   });
 
   els.content.addEventListener("click", (event) => {
+    if (event.target.closest("[data-action='start-selection']")) {
+      state.mode = "study";
+      render();
+      return;
+    }
     const cloze = event.target.closest(".cloze");
     if (cloze) {
       cloze.classList.toggle("is-hidden");
@@ -590,10 +605,35 @@ function extractTermTitle(body) {
 function render() {
   renderYearList();
   renderChrome();
+  renderReviewChapters();
   renderReviewRounds();
   renderSyncPanel();
   renderStats();
   renderContent();
+}
+
+function switchReviewChapter(chapter) {
+  const next = normalizeReviewChapter(chapter);
+  if (state.reviewChapter === next) return;
+  state.reviewChapter = next;
+  state.reviewRound = loadReviewRound(next);
+  state.showAnswers = false;
+  state.revealedTermKeys.clear();
+  state.query = "";
+  els.searchInput.value = "";
+  localStorage.setItem(REVIEW_CHAPTER_KEY, String(next));
+  if (!itemsForChapter(next).length) state.mode = "study";
+  render();
+}
+
+function renderReviewChapters() {
+  els.reviewChapterButtons.forEach((button) => {
+    const chapter = normalizeReviewChapter(button.dataset.reviewChapter);
+    const active = chapter === state.reviewChapter;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.innerHTML = `<span>篇章 ${chapter}</span><small>${itemsForChapter(chapter).length}</small>`;
+  });
 }
 
 function renderYearList() {
@@ -667,7 +707,7 @@ function groupedExams() {
 function renderChrome() {
   const exam = getActiveExam();
   els.yearTitle.textContent = exam?.title || "英语真题";
-  els.modeLabel.textContent = state.mode === "study" ? "真题训练" : "复习库";
+  els.modeLabel.textContent = `篇章 ${state.reviewChapter} · ${state.mode === "study" ? "真题训练" : "复习库"}`;
   els.studyMode.classList.toggle("is-active", state.mode === "study");
   els.reviewMode.classList.toggle("is-active", state.mode === "review");
   els.toggleAnswers.classList.toggle("is-on", state.showAnswers);
@@ -758,8 +798,10 @@ function renderContent() {
 
   if (filtered.length === 0) {
     els.content.innerHTML =
-      state.mode === "review"
-        ? `<div class="empty">第 ${state.reviewRound} 轮还没有内容。</div>`
+      state.query
+        ? `<div class="empty">没有匹配内容。</div>`
+        : state.mode === "review"
+        ? `<div class="empty"><p>篇章 ${state.reviewChapter} · 第 ${state.reviewRound} 轮还没有内容。</p><button class="segment" type="button" data-action="start-selection">开始筛选</button></div>`
         : `<div class="empty">没有匹配内容。</div>`;
     return;
   }
@@ -1768,6 +1810,7 @@ function stripLeadingBeVerb(text) {
 
 function toggleTerm(examId, cardId, termId) {
   const key = makeKey(examId, cardId, termId);
+  const hovered = state.hoveredTermRow?.dataset;
   const wasSaved = Boolean(state.library[key]);
 
   if (wasSaved && !canRemoveSavedItem(state.library[key])) {
@@ -1785,18 +1828,25 @@ function toggleTerm(examId, cardId, termId) {
       termId,
       addedAt: new Date().toISOString(),
       reviewRound: 1,
+      reviewChapter: state.reviewChapter,
     };
     state.revealedTermKeys.add(key);
   }
 
   saveLibrary();
   render();
+  if (hovered && !state.touchMode) {
+    const row = [...els.content.querySelectorAll(".term-row[data-term-id], .cloze-table-row[data-term-id]")].find((element) =>
+      element.dataset.examId === hovered.examId && element.dataset.cardId === hovered.cardId && element.dataset.termId === hovered.termId
+    );
+    if (row) setHoveredTermRow(row);
+  }
   syncItemMutation(
     wasSaved ? "delete" : "upsert",
-    state.library[key] || { examId, cardId, termId, addedAt: new Date().toISOString() },
+    state.library[key] || { examId, cardId, termId, reviewChapter: state.reviewChapter, addedAt: new Date().toISOString() },
     key
   );
-  showToast(wasSaved ? "已移出复习库" : "已加入复习库");
+  showToast(wasSaved ? `已移出篇章 ${state.reviewChapter}` : `已加入篇章 ${state.reviewChapter}`);
 }
 
 function canRemoveSavedItem(item) {
@@ -1908,9 +1958,11 @@ function applyCloudRecords(records) {
       else state.annotations[record.itemKey] = { ...state.annotations[record.itemKey], ...record.payload };
     }
   });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.library));
+  saveLibrary();
   localStorage.setItem(ANNOTATION_STORAGE_KEY, JSON.stringify(state.annotations));
   renderYearList();
+  renderReviewChapters();
+  renderReviewRounds();
   renderStats();
   renderContent();
 }
@@ -1956,8 +2008,22 @@ function normalizeFontSize(size) {
   return FONT_SIZES.has(size) ? size : "medium";
 }
 
-function loadReviewRound() {
-  return normalizeReviewRound(localStorage.getItem(REVIEW_ROUND_KEY));
+function normalizeReviewChapter(chapter) {
+  const value = Number(chapter);
+  return Number.isInteger(value) && value >= 1 && value <= MAX_REVIEW_CHAPTER ? value : 1;
+}
+
+function loadReviewChapter() {
+  const stored = localStorage.getItem(REVIEW_CHAPTER_KEY);
+  return stored === null ? 2 : normalizeReviewChapter(stored);
+}
+
+function reviewRoundStorageKey(chapter) {
+  return chapter === 1 ? REVIEW_ROUND_KEY : `${REVIEW_ROUND_KEY}-chapter-${chapter}`;
+}
+
+function loadReviewRound(chapter = loadReviewChapter()) {
+  return normalizeReviewRound(localStorage.getItem(reviewRoundStorageKey(chapter)));
 }
 
 function normalizeReviewRound(round) {
@@ -2057,11 +2123,23 @@ function reviewRoundOf(item) {
 }
 
 function savedItemsForExam(examId) {
-  return Object.values(state.library).filter((item) => item.examId === examId);
+  return itemsForChapter(state.reviewChapter).filter((item) => item.examId === examId);
 }
 
-function makeKey(examId, cardId, termId) {
-  return `${examId}::${cardId}::${termId}`;
+function chapterOfItem(key, item) {
+  const match = String(key).match(/::review-chapter-([2-4])$/);
+  return match ? Number(match[1]) : normalizeReviewChapter(item.reviewChapter);
+}
+
+function itemsForChapter(chapter) {
+  return Object.entries(state.library)
+    .filter(([key, item]) => chapterOfItem(key, item) === chapter)
+    .map(([, item]) => item);
+}
+
+function makeKey(examId, cardId, termId, chapter = state.reviewChapter) {
+  const base = `${examId}::${cardId}::${termId}`;
+  return chapter === 1 ? base : `${base}::review-chapter-${chapter}`;
 }
 
 function loadLibrary() {
