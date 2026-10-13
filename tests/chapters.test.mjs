@@ -94,3 +94,18 @@ test("Q can add and remove without moving the pointer after a render", () => {
   assert.equal(app.itemsForChapter(2).length, 0);
   assert.equal(app.itemsForChapter(1).length, 1);
 });
+
+test("a cloud refresh keeps the hovered word available to cancel with Q", () => {
+  const { app, nodes } = appFixture();
+  const row = { dataset: { examId: "year-test", cardId: "card-test", termId: "term-0" },
+    classList: { add() {}, remove() {} } };
+  nodes.get("#content").querySelectorAll = () => [row];
+  app.state.hoveredTermRow = row;
+  app.handleHoveredTermShortcut(row);
+  const key = `${baseKey}::review-chapter-2`;
+  app.applyCloudRecords([{ entityType: "review_item", itemKey: key, payload: { ...app.state.library[key] } }]);
+  assert.equal(app.state.hoveredTermRow, row);
+  app.handleHoveredTermShortcut(row);
+  assert.equal(app.itemsForChapter(2).length, 0);
+  assert.equal(app.itemsForChapter(1).length, 1);
+});

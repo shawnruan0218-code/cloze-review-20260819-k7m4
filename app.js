@@ -1835,12 +1835,7 @@ function toggleTerm(examId, cardId, termId) {
 
   saveLibrary();
   render();
-  if (hovered && !state.touchMode) {
-    const row = [...els.content.querySelectorAll(".term-row[data-term-id], .cloze-table-row[data-term-id]")].find((element) =>
-      element.dataset.examId === hovered.examId && element.dataset.cardId === hovered.cardId && element.dataset.termId === hovered.termId
-    );
-    if (row) setHoveredTermRow(row);
-  }
+  restoreHoveredTermRow(hovered);
   syncItemMutation(
     wasSaved ? "delete" : "upsert",
     state.library[key] || { examId, cardId, termId, reviewChapter: state.reviewChapter, addedAt: new Date().toISOString() },
@@ -1948,6 +1943,7 @@ function handleCloudStatus({ kind, message, session }) {
 }
 
 function applyCloudRecords(records) {
+  const hovered = state.hoveredTermRow?.dataset;
   records.forEach((record) => {
     if (record.entityType === "review_item") {
       if (record.deletedAt) delete state.library[record.itemKey];
@@ -1965,6 +1961,7 @@ function applyCloudRecords(records) {
   renderReviewRounds();
   renderStats();
   renderContent();
+  restoreHoveredTermRow(hovered);
 }
 
 async function exportLocalBackup() {
@@ -2101,6 +2098,14 @@ function setHoveredTermRow(row) {
   clearHoveredTermRow();
   state.hoveredTermRow = row;
   row.classList.add("is-key-target");
+}
+
+function restoreHoveredTermRow(target) {
+  if (!target || state.touchMode) return;
+  const row = [...els.content.querySelectorAll(".term-row[data-term-id], .cloze-table-row[data-term-id]")].find((element) =>
+    element.dataset.examId === target.examId && element.dataset.cardId === target.cardId && element.dataset.termId === target.termId
+  );
+  if (row) setHoveredTermRow(row);
 }
 
 function clearHoveredTermRow(row = state.hoveredTermRow) {
