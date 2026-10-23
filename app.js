@@ -1,5 +1,6 @@
 const STORAGE_KEY = "cloze-review-library-v1";
 const LAST_YEAR_KEY = "cloze-review-last-year";
+const LAST_WRITING_FILE_KEY = "cloze-review-last-writing-file";
 const HOVER_REVEAL_KEY = "cloze-review-hover-reveal";
 const COLLAPSED_GROUPS_KEY = "cloze-review-collapsed-groups";
 const FONT_SIZE_KEY = "cloze-review-font-size";
@@ -10,7 +11,7 @@ const TOUCH_MODE_QUERY = "(hover: none), (pointer: coarse), (max-width: 700px)";
 const MOBILE_NAV_QUERY = "(max-width: 860px)";
 const FONT_SIZES = new Set(["small", "medium", "large"]);
 const MAX_REVIEW_ROUND = 4;
-const MAX_REVIEW_CHAPTER = 4;
+const MAX_REVIEW_CHAPTER = 5;
 
 const els = {
   yearList: document.querySelector("#yearList"),
@@ -20,6 +21,8 @@ const els = {
   studyMode: document.querySelector("#studyMode"),
   reviewMode: document.querySelector("#reviewMode"),
   reviewChapterButtons: [...document.querySelectorAll("[data-review-chapter]")],
+  writingNavigation: document.querySelector("#writingNavigation"),
+  writingSection: document.querySelector("#writingSection"),
   reviewRounds: document.querySelector("#reviewRounds"),
   reviewRoundButtons: [...document.querySelectorAll("[data-review-round]")],
   toggleAnswers: document.querySelector("#toggleAnswers"),
@@ -79,6 +82,7 @@ const state = {
   hoveredAnnotationId: "",
   pendingAnnotation: null,
   revealedTermKeys: new Set(),
+  writingRevealedAnswers: new Map(),
   authSession: null,
   syncConfigured: Boolean(cloudSync?.configured),
   syncBusy: false,
@@ -94,13 +98,13 @@ function init() {
     return;
   }
 
-  state.exams = window.EXAM_DATA.map(parseExam);
+  state.exams = [...window.EXAM_DATA.map(parseExam), ...(window.WRITING_DATA || [])];
   state.examById = new Map(state.exams.map((exam) => [exam.id, exam]));
   state.activeExamId =
-    localStorage.getItem(LAST_YEAR_KEY) || state.exams[0]?.id || "";
+    localStorage.getItem(activeFileStorageKey()) || availableExams()[0]?.id || "";
 
-  if (!state.examById.has(state.activeExamId)) {
-    state.activeExamId = state.exams[0].id;
+  if (!availableExams().some((exam) => exam.id === state.activeExamId)) {
+    state.activeExamId = availableExams()[0]?.id || "";
   }
 
   bindEvents();
@@ -115,11 +119,13 @@ function bindEvents() {
 
   els.studyMode.addEventListener("click", () => {
     state.mode = "study";
+    state.writingRevealedAnswers.clear();
     render();
   });
 
   els.reviewMode.addEventListener("click", () => {
     state.mode = "review";
+    state.writingRevealedAnswers.clear();
     render();
   });
 
@@ -133,12 +139,14 @@ function bindEvents() {
       localStorage.setItem(reviewRoundStorageKey(state.reviewChapter), String(state.reviewRound));
       state.showAnswers = false;
       state.revealedTermKeys.clear();
+      state.writingRevealedAnswers.clear();
       render();
     });
   });
 
   els.toggleAnswers.addEventListener("click", () => {
     state.showAnswers = !state.showAnswers;
+    state.writingRevealedAnswers.clear();
     render();
   });
 
@@ -182,6 +190,11 @@ function bindEvents() {
   els.searchInput.addEventListener("input", (event) => {
     state.query = event.target.value.trim().toLowerCase();
     renderContent();
+  });
+
+  els.writingSection.addEventListener("change", () => {
+    const target = els.writingSection.value === "__start__" ? els.content : document.getElementById(els.writingSection.value);
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   touchModeMedia.addEventListener("change", (event) => {
@@ -237,13 +250,21 @@ function bindEvents() {
 
     const button = event.target.closest("[data-exam-id]");
     if (!button) return;
+    if (!availableExams().some((exam) => exam.id === button.dataset.examId)) return;
     state.activeExamId = button.dataset.examId;
-    localStorage.setItem(LAST_YEAR_KEY, state.activeExamId);
+    state.writingRevealedAnswers.clear();
+    localStorage.setItem(activeFileStorageKey(), state.activeExamId);
     if (mobileNavMedia.matches) setMobileNavOpen(false);
     render();
+    if (state.reviewChapter === 5) window.scrollTo({ top: 0, behavior: "instant" });
   });
 
   els.content.addEventListener("click", (event) => {
+    const writingAnswer = event.target.closest("[data-action='toggle-writing-answer']");
+    if (writingAnswer) {
+      toggleWritingAnswer(writingAnswer.dataset.answerKey);
+      return;
+    }
     if (event.target.closest("[data-action='start-selection']")) {
       state.mode = "study";
       render();
@@ -274,6 +295,7 @@ function bindEvents() {
 
     const rowTarget = event.target.closest(".term-row[data-term-id], .cloze-table-row[data-term-id]");
     if (rowTarget) {
+      if (rowTarget.classList.contains("writing-module")) return;
       if (rowTarget.classList.contains("cloze-table-row")) return;
       if (state.mode === "review") return;
       toggleTerm(rowTarget.dataset.examId, rowTarget.dataset.cardId, rowTarget.dataset.termId);
@@ -619,9 +641,14 @@ function switchReviewChapter(chapter) {
   state.reviewRound = loadReviewRound(next);
   state.showAnswers = false;
   state.revealedTermKeys.clear();
+  state.writingRevealedAnswers.clear();
   state.query = "";
   els.searchInput.value = "";
   localStorage.setItem(REVIEW_CHAPTER_KEY, String(next));
+  if (!availableExams().some((exam) => exam.id === state.activeExamId)) {
+    const remembered = localStorage.getItem(activeFileStorageKey());
+    state.activeExamId = availableExams().find((exam) => exam.id === remembered)?.id || availableExams()[0]?.id || "";
+  }
   if (!itemsForChapter(next).length) state.mode = "study";
   render();
 }
@@ -637,6 +664,13 @@ function renderReviewChapters() {
 }
 
 function renderYearList() {
+  if (state.reviewChapter === 5) {
+    els.yearList.innerHTML = `<div class="writing-files"><div class="writing-files-label">结构重塑</div>${availableExams().map((exam) => `
+      <button class="year-button writing-file${exam.id === state.activeExamId ? " is-active" : ""}" type="button" data-exam-id="${exam.id}" title="${escapeHtml(exam.filename)}">
+        <strong>${escapeHtml(exam.title)}</strong><span>${savedItemsForExam(exam.id).length}</span>
+      </button>`).join("")}</div>`;
+    return;
+  }
   els.yearList.innerHTML = groupedExams()
     .map(
       (group) => {
@@ -687,7 +721,7 @@ function groupedExams() {
   const groups = [];
   const groupById = new Map();
 
-  state.exams.forEach((exam) => {
+  availableExams().forEach((exam) => {
     const id = exam.courseId || "english1";
     if (!groupById.has(id)) {
       const group = {
@@ -706,20 +740,24 @@ function groupedExams() {
 
 function renderChrome() {
   const exam = getActiveExam();
+  const writing = isWritingExam(exam) && state.reviewChapter === 5;
   els.yearTitle.textContent = exam?.title || "英语真题";
-  els.modeLabel.textContent = `篇章 ${state.reviewChapter} · ${state.mode === "study" ? "真题训练" : "复习库"}`;
+  els.modeLabel.textContent = `篇章 ${state.reviewChapter} · ${writing ? "结构重塑 · " : ""}${state.mode === "study" ? (writing ? "正文" : "真题训练") : "复习库"}`;
+  els.studyMode.textContent = writing ? "正文" : "训练";
+  document.body.classList.toggle("writing-mode", writing);
+  els.writingNavigation.hidden = !writing;
   els.studyMode.classList.toggle("is-active", state.mode === "study");
   els.reviewMode.classList.toggle("is-active", state.mode === "review");
   els.toggleAnswers.classList.toggle("is-on", state.showAnswers);
   els.toggleAnswers.title = state.showAnswers ? "隐藏答案" : "显示答案";
-  els.hoverReveal.hidden = state.touchMode;
+  els.hoverReveal.hidden = state.touchMode || writing;
   els.hoverReveal.classList.toggle("is-on", !state.touchMode && state.hoverReveal);
   els.hoverReveal.title = state.hoverReveal ? "关闭悬停显示" : "开启悬停显示";
   document.body.dataset.fontSize = state.fontSize;
   els.fontSizeButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.fontSize === state.fontSize);
   });
-  document.body.classList.toggle("hover-reveal", !state.touchMode && state.hoverReveal);
+  document.body.classList.toggle("hover-reveal", !writing && !state.touchMode && state.hoverReveal);
   document.body.classList.toggle("touch-mode", state.touchMode);
   if (state.touchMode || !state.hoverReveal) clearHoveredClozes();
 }
@@ -770,7 +808,13 @@ function renderSyncPanel() {
 
 function renderStats() {
   const exam = getActiveExam();
+  if (!exam) return;
   const reviewItems = savedItemsForExam(exam.id);
+  if (isWritingExam(exam)) {
+    const selected = reviewItems.filter((item) => state.mode !== "review" || reviewRoundOf(item) >= state.reviewRound).length;
+    els.statsStrip.innerHTML = `<div class="stat"><strong>${exam.termCount}</strong><span>英中模块</span></div><div class="stat"><strong>${exam.inventory.notes}</strong><span>中文批注</span></div><div class="stat"><strong>${selected}</strong><span>复习模块</span></div>`;
+    return;
+  }
   const activeRoundItems = reviewItems.filter(
     (item) => reviewRoundOf(item) >= state.reviewRound
   );
@@ -792,6 +836,11 @@ function renderContent() {
   state.hoveredTermRow = null;
   state.hoveredEnglishCell = null;
   clearHoveredAnnotation();
+
+  if (isWritingExam(exam) && state.reviewChapter === 5) {
+    renderWritingContent(exam);
+    return;
+  }
 
   const cards = state.mode === "review" ? reviewCardsForExam(exam) : studyCardsForExam(exam);
   const filtered = filterCards(cards);
@@ -823,6 +872,30 @@ function renderContent() {
 
 function studyCardsForExam(exam) {
   return exam.cards;
+}
+
+function renderWritingContent(exam) {
+  const result = window.ClozeWriting.render(exam, {
+    mode: state.mode, query: state.query, showAnswers: state.showAnswers,
+    revealed: state.writingRevealedAnswers,
+    keyFor: (card) => makeKey(exam.id, card.id, "module"),
+    itemFor: (card) => state.library[makeKey(exam.id, card.id, "module")],
+    isInRound: (card) => isInReviewRound(exam.id, card.id, "module", state.reviewRound),
+    canRemove: canRemoveSavedItem,
+    advanceButton: (card) => renderAdvanceButton(card, card.terms[0]),
+  });
+  els.content.innerHTML = result.html;
+  const selected = els.writingSection.value;
+  els.writingSection.innerHTML = `<option value="__start__">文件开头</option>${result.toc.map((section) => `<option value="${section.id}">${"　".repeat(Math.max(0, section.level - 4))}${escapeHtml(section.title)}</option>`).join("")}`;
+  els.writingSection.value = result.toc.some((section) => section.id === selected) ? selected : "__start__";
+}
+
+function toggleWritingAnswer(key) {
+  const hovered = state.hoveredTermRow?.dataset;
+  const revealed = state.writingRevealedAnswers.get(key) ?? state.showAnswers;
+  state.writingRevealedAnswers.set(key, !revealed);
+  renderContent();
+  restoreHoveredTermRow(hovered);
 }
 
 function reviewCardsForExam(exam) {
@@ -2132,7 +2205,7 @@ function savedItemsForExam(examId) {
 }
 
 function chapterOfItem(key, item) {
-  const match = String(key).match(/::review-chapter-([2-4])$/);
+  const match = String(key).match(/::review-chapter-([2-5])$/);
   return match ? Number(match[1]) : normalizeReviewChapter(item.reviewChapter);
 }
 
@@ -2199,7 +2272,19 @@ function saveCollapsedCourseIds() {
 }
 
 function getActiveExam() {
-  return state.examById.get(state.activeExamId) || state.exams[0];
+  return availableExams().find((exam) => exam.id === state.activeExamId) || availableExams()[0];
+}
+
+function availableExams() {
+  return state.exams.filter((exam) => state.reviewChapter === 5 ? isWritingExam(exam) : !isWritingExam(exam));
+}
+
+function activeFileStorageKey() {
+  return state.reviewChapter === 5 ? LAST_WRITING_FILE_KEY : LAST_YEAR_KEY;
+}
+
+function isWritingExam(exam) {
+  return exam?.courseId === "writing";
 }
 
 function isClozeExam(exam) {

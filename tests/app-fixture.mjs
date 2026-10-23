@@ -41,7 +41,8 @@ export function appFixture({ storage = new Map(), library = { [baseKey]: oldItem
   vm.runInContext(fs.readFileSync(new URL("../app.js", import.meta.url), "utf8"), context);
   const app = vm.runInContext(`({ state, switchReviewChapter, makeKey, itemsForChapter,
     savedItemsForExam, isSaved, isInReviewRound, toggleTerm, advanceTermToNextRound,
-    applyCloudRecords, loadLibrary, canRemoveSavedItem, handleHoveredTermShortcut })`, context);
+    applyCloudRecords, loadLibrary, canRemoveSavedItem, handleHoveredTermShortcut,
+    availableExams, getActiveExam, renderContent, renderYearList, toggleWritingAnswer })`, context);
   const exam = {
     id: "year-test", title: "测试真题", year: "2020", courseId: "english1", courseTitle: "英语一", clozeCount: 2,
     cards: [{ id: "card-test", examId: "year-test", type: "card", clozeCount: 2,

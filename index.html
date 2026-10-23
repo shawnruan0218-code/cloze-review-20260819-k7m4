@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>英语 Cloze 复习库</title>
-    <link rel="stylesheet" href="./styles.css?v=20261013-review-chapters" />
+    <link rel="stylesheet" href="./styles.css?v=20261023-writing-chapter5" />
   </head>
   <body>
     <div class="app-shell">
@@ -61,6 +61,7 @@
           <button class="review-chapter is-active" type="button" role="tab" data-review-chapter="2">篇章 2</button>
           <button class="review-chapter" type="button" role="tab" data-review-chapter="3">篇章 3</button>
           <button class="review-chapter" type="button" role="tab" data-review-chapter="4">篇章 4</button>
+          <button class="review-chapter" type="button" role="tab" data-review-chapter="5" title="结构重塑">篇章 5</button>
         </nav>
 
         <nav class="review-rounds" id="reviewRounds" aria-label="篇章内复习轮次" hidden>
@@ -86,6 +87,10 @@
         </section>
 
         <section class="stats-strip" id="statsStrip"></section>
+        <nav class="writing-navigation" id="writingNavigation" aria-label="文件目录" hidden>
+          <label for="writingSection">目录</label>
+          <select id="writingSection" aria-label="跳转到章节"></select>
+        </nav>
         <section class="content" id="content"></section>
       </main>
     </div>
@@ -133,8 +138,10 @@
     <script src="./data.js?v=20260716-english1-2018-corrected"></script>
     <script src="./data-english2.js?v=20260716-english2-2022"></script>
     <script src="./data-cloze.js?v=20260716-cloze-answer-status"></script>
+    <script src="./writing-data.js?v=20261023-writing-chapter5"></script>
+    <script src="./writing-view.js?v=20261023-writing-chapter5"></script>
     <script src="./cloudflare-config.js?v=20260819-cloudflare-migration"></script>
-    <script src="./cloud-sync.js?v=20261013-review-chapters"></script>
-    <script src="./app.js?v=20261013-review-chapters-2"></script>
+    <script src="./cloud-sync.js?v=20261023-writing-chapter5"></script>
+    <script src="./app.js?v=20261023-writing-chapter5"></script>
   </body>
 </html>

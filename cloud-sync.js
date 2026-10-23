@@ -314,11 +314,11 @@
       counts: records.reduce((counts, row) => ({ ...counts, [row.entityType]: (counts[row.entityType] || 0) + 1 }), {}),
       chapters: records.reduce((counts, row) => {
         if (row.entityType !== "review_item" || row.deletedAt) return counts;
-        const match = row.itemKey.match(/::review-chapter-([2-4])$/);
+        const match = row.itemKey.match(/::review-chapter-([2-5])$/);
         const chapter = match ? Number(match[1]) : Number(row.payload.reviewChapter || 1);
         counts[chapter] = (counts[chapter] || 0) + 1;
         return counts;
-      }, { 1: 0, 2: 0, 3: 0, 4: 0 }),
+      }, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }),
     };
     envelope.checksum = await checksum(stableJson(envelope));
     return envelope;

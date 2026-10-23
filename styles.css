@@ -305,7 +305,8 @@ button {
 }
 
 .review-chapters {
-  max-width: 620px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  max-width: 660px;
   margin-top: 0;
   border-color: #bdcfcb;
 }
@@ -1180,4 +1181,116 @@ code {
     grid-column: 1 / -1;
     width: 100%;
   }
+}
+
+.writing-navigation[hidden],
+.hover-button[hidden] { display: none; }
+
+.writing-files { display: grid; gap: 8px; }
+.writing-files-label { padding: 0 10px 8px; color: #c6d4dc; font-size: 13px; font-weight: 700; }
+.writing-file { min-height: 60px; }
+.writing-file strong { overflow: visible; white-space: normal; line-height: 1.5; }
+.writing-mode .main { background: white; }
+.writing-mode .topbar { flex-direction: column; align-items: stretch; gap: 12px; }
+.writing-mode #yearTitle { font-size: 24px; line-height: 1.45; }
+.writing-mode .toolbar { justify-content: flex-start; }
+
+.writing-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  background: white;
+}
+
+.writing-navigation label { color: var(--muted); font-size: 13px; font-weight: 700; }
+.writing-navigation select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid #cbd7d4;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #f7faf9;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.writing-document { max-width: 1050px; padding: 8px 0 36px; }
+.writing-heading { margin: 26px 0 10px; font-weight: 750; line-height: 1.55; scroll-margin-top: 82px; }
+.writing-level-4 { font-size: 20px; }
+.writing-level-5 { font-size: 18px; }
+.writing-level-6 { font-size: 16px; }
+.writing-heading + .writing-heading { margin-top: 8px; }
+
+.writing-module.term-row {
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 15px 0;
+  border-bottom: 1px solid #edf0f2;
+  border-radius: 0;
+}
+.writing-module .term-actions { flex-direction: column; align-items: center; padding-top: 4px; }
+.writing-module-body, .writing-line > div { min-width: 0; }
+.writing-lines {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--content-font-size);
+  line-height: 1.85;
+}
+.writing-line { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 5px; overflow-wrap: anywhere; }
+.writing-bullet { color: #64756e; font-weight: 800; }
+.writing-english .writing-bullet { padding-top: 5px; }
+.writing-answer {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: #f5f8f7;
+  color: var(--ink);
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.writing-answer.is-hidden { border-bottom: 2px solid #c6a42e; background: #fff0a1; }
+.writing-answer.is-hidden .writing-answer-text { visibility: hidden; }
+.writing-answer:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.writing-chinese > div { padding: 0 8px; }
+.writing-notes { margin: 12px 0 16px 42px; padding: 5px 0 5px 10px; border-left: 2px solid #cbd9d4; color: #4d5e56; }
+.writing-highlight { border-radius: 2px; color: #1e252b; }
+.writing-table-wrap { max-width: 100%; margin: 16px 0 16px 42px; overflow: auto; }
+.writing-table { width: 100%; min-width: 390px; border-collapse: collapse; font-size: var(--content-font-size); }
+.writing-table th, .writing-table td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+.writing-table th { background: #f4f7f6; }
+.writing-original { margin: 18px 0 18px 42px; }
+.writing-original summary { cursor: pointer; color: var(--accent-strong); }
+.writing-original img { display: block; max-width: 100%; height: auto; margin-top: 12px; }
+
+@media (max-width: 860px) {
+  .writing-navigation { top: 74px; }
+  .writing-heading { scroll-margin-top: 156px; }
+}
+
+@media (max-width: 560px) {
+  .review-chapters { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .review-chapter { font-size: 14px; }
+  .writing-mode .stats-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .writing-mode .stat { padding: 10px 8px; }
+  .writing-mode .stat strong { font-size: 22px; }
+  .writing-mode .stat span { font-size: 12px; }
+  .writing-mode #yearTitle { font-size: 21px; }
 }

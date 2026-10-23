@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "writing:build": "node scripts/build-writing-data.mjs",
     "migration:build": "node scripts/build-d1-import.mjs",
     "migration:verify": "node scripts/verify-migration.mjs",
     "dev:worker": "wrangler dev",

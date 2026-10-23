@@ -11,7 +11,7 @@ test("immediate backup includes queued chapter writes and reload restores both c
   device.cloud.enqueueReview("upsert", newItem, chapter2Key);
   const backup = await device.cloud.exportBackup();
   assert.equal(backup.version, 3);
-  assert.deepEqual(plain(backup.chapters), { 1: 1, 2: 1, 3: 0, 4: 0 });
+  assert.deepEqual(plain(backup.chapters), { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 });
   const reloaded = await cloudFixture({ indexedDB: device.indexedDB });
   assert.deepEqual(plain(reloaded.library()[chapter2Key]), newItem);
   assert.equal(reloaded.library()[baseKey].reviewRound, 4);
@@ -61,4 +61,25 @@ test("offline chapter selection syncs to another device and scoped removal conve
   assert.equal(first.library()[baseKey].reviewRound, 4);
   assert.equal(server.records.get(`review_item:${baseKey}`).deletedAt, null);
   assert.ok(server.records.get(`review_item:${chapter2Key}`).deletedAt);
+});
+
+test("whole writing modules sync and restore in chapter five without affecting older chapters", async () => {
+  const server = syncServer();
+  const key = "writing-miu-large::writing-miu-large-module-example::module::review-chapter-5";
+  const item = { examId: "writing-miu-large", cardId: "writing-miu-large-module-example", termId: "module", reviewChapter: 5, reviewRound: 1,
+    addedAt: "2026-10-23T01:00:00.000Z", updatedAt: "2026-10-23T01:00:00.000Z" };
+  const first = await cloudFixture({ library: { [baseKey]: oldItem }, server });
+  await first.cloud.syncNow();
+  await first.cloud.enqueueReview("upsert", item, key);
+  await first.cloud.syncNow();
+  const second = await cloudFixture({ server });
+  await second.cloud.syncNow();
+  assert.deepEqual(plain(second.library()[key]), item);
+  assert.equal(second.library()[baseKey].reviewRound, 4);
+  const backup = await second.cloud.exportBackup();
+  assert.equal(backup.chapters[5], 1);
+  const empty = await cloudFixture();
+  await empty.cloud.importBackup(backup);
+  assert.deepEqual(plain(empty.library()[key]), item);
+  assert.equal(empty.library()[baseKey].reviewRound, 4);
 });
