@@ -1222,7 +1222,7 @@ code {
   font-size: 14px;
 }
 
-.writing-document { max-width: 1050px; padding: 8px 0 36px; }
+.writing-document { min-width: 0; width: 100%; max-width: 1050px; padding: 8px 0 36px; }
 .writing-heading { margin: 26px 0 10px; font-weight: 750; line-height: 1.55; scroll-margin-top: 82px; }
 .writing-level-4 { font-size: 20px; }
 .writing-level-5 { font-size: 18px; }
