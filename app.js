@@ -194,7 +194,7 @@ function bindEvents() {
 
   els.writingSection.addEventListener("change", () => {
     const target = els.writingSection.value === "__start__" ? els.content : document.getElementById(els.writingSection.value);
-    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    target?.scrollIntoView({ behavior: "instant", block: "start" });
   });
 
   touchModeMedia.addEventListener("change", (event) => {

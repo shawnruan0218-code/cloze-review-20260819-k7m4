@@ -139,3 +139,24 @@ test("source formatting is allowed but executable HTML remains escaped", () => {
   assert.match(html, /<u>下划线<\/u>/);
   assert.doesNotMatch(html, /<img|<script/);
 });
+
+test("directory changes jump instantly to a heading or the file beginning without changing progress", () => {
+  const { app, nodes, context, mutations } = writingFixture();
+  const calls = [];
+  context.document.getElementById = (id) => id === "target-section" ? {
+    scrollIntoView: (options) => calls.push([id, plain(options)]),
+  } : null;
+  nodes.get("#content").scrollIntoView = (options) => calls.push(["start", plain(options)]);
+  app.bindEvents();
+  const selector = nodes.get("#writingSection");
+  for (const value of ["target-section", "__start__", "missing-section"]) {
+    selector.value = value;
+    selector.listeners.change();
+  }
+  assert.deepEqual(calls, [
+    ["target-section", { behavior: "instant", block: "start" }],
+    ["start", { behavior: "instant", block: "start" }],
+  ]);
+  assert.equal(mutations.length, 0);
+  assert.deepEqual(plain(app.state.library[baseKey]), oldItem);
+});

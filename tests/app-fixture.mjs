@@ -13,8 +13,8 @@ export function appFixture({ storage = new Map(), library = { [baseKey]: oldItem
   const nodes = new Map();
   const mutations = [];
   const element = () => ({
-    innerHTML: "", textContent: "", value: "", dataset: {}, attrs: {},
-    addEventListener() {},
+    innerHTML: "", textContent: "", value: "", dataset: {}, attrs: {}, listeners: {},
+    addEventListener(type, handler) { this.listeners[type] = handler; },
     setAttribute(key, value) { this.attrs[key] = value; },
     querySelectorAll() { return []; },
     classList: { add() {}, remove() {}, toggle() {} },
@@ -42,7 +42,7 @@ export function appFixture({ storage = new Map(), library = { [baseKey]: oldItem
   const app = vm.runInContext(`({ state, switchReviewChapter, makeKey, itemsForChapter,
     savedItemsForExam, isSaved, isInReviewRound, toggleTerm, advanceTermToNextRound,
     applyCloudRecords, loadLibrary, canRemoveSavedItem, handleHoveredTermShortcut,
-    availableExams, getActiveExam, renderContent, renderYearList, toggleWritingAnswer })`, context);
+    availableExams, getActiveExam, renderContent, renderYearList, toggleWritingAnswer, bindEvents })`, context);
   const exam = {
     id: "year-test", title: "测试真题", year: "2020", courseId: "english1", courseTitle: "英语一", clozeCount: 2,
     cards: [{ id: "card-test", examId: "year-test", type: "card", clozeCount: 2,
